@@ -160,7 +160,8 @@ export interface MindMapNode {
 }
 
 export type AppStep = 'landing' | 'input' | 'validateBlueprint' | 'dashboard';
-export type ViewMode = 'mindmap' | 'gallery';
+
+export type ViewMode = 'dashboard' | 'mindmap';
 
 export type PivotType =
   | 'age-shift'

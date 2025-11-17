@@ -7,11 +7,12 @@ import { DnaValidationStep } from './components/DnaValidationStep';
 import { ConceptDashboard } from './components/ConceptGallery';
 import { LoadingIndicator } from './components/LoadingIndicator';
 import { Lightbox } from './components/Lightbox';
-import { AdConcept, CampaignBlueprint, MindMapNode, AppStep, CreativeFormat, ALL_CREATIVE_FORMATS, TargetPersona, BuyingTriggerObject } from './types';
+import { AdConcept, CampaignBlueprint, MindMapNode, AppStep, CreativeFormat, ALL_CREATIVE_FORMATS, TargetPersona, BuyingTriggerObject, ViewMode, AwarenessStage, PlacementFormat, OfferTypeObject, PainDesireObject, ObjectionObject, ALL_AWARENESS_STAGES, ALL_PLACEMENT_FORMATS } from './types';
 // FIX: Changed import from generateGridForPersona, which was not exported, to the correct function name. The logic is now handled by the renamed generateGridForPersona function.
-import { analyzeCampaignBlueprint, generateCreativeIdeas, analyzeLandingPage, analyzeTextToBlueprint } from './services/geminiService';
+import { analyzeCampaignBlueprint, generateCreativeIdeas, analyzeLandingPage, analyzeTextToBlueprint, generatePainDesires, generateObjections, generateOfferTypes, generateHighLevelAngles, generateBuyingTriggers, generateConceptsFromPersona } from './services/geminiService';
 import { EditModal } from './components/EditModal';
 import { LandingPage } from './components/LandingPage';
+import { MindMapView } from './components/MindMapView';
 
 // Simple UUID generator
 function simpleUUID() {
@@ -38,6 +39,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<AppStep>('landing');
+  const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
   const [lightboxData, setLightboxData] = useState<{ concept: AdConcept, startIndex: number } | null>(null);
   const [allowVisualExploration, setAllowVisualExploration] = useState<boolean>(true);
 
@@ -171,7 +173,7 @@ const handleGenerateMatrixCampaign = async (validatedBlueprint: CampaignBlueprin
 
         const creativeNodes: MindMapNode[] = taggedConcepts.map(concept => ({
             id: concept.id,
-            parentId: concept.strategicPathId,
+            parentId: personaIdMap.get(concept.personaDescription), // Link creative to its persona node
             type: 'creative',
             label: concept.headline,
             content: { concept },
@@ -257,7 +259,208 @@ const handleGenerateMatrixCampaign = async (validatedBlueprint: CampaignBlueprin
           return n;
       }));
   };
-  
+    // --- Mind Map Handlers ---
+
+    const findNodeAndAncestry = (nodeId: string, allNodes: MindMapNode[]): { node: MindMapNode; ancestry: MindMapNode[] } | null => {
+        const nodeMap = new Map(allNodes.map(n => [n.id, n]));
+        const node = nodeMap.get(nodeId);
+        if (!node) return null;
+
+        const ancestry: MindMapNode[] = [];
+        let current = node.parentId ? nodeMap.get(node.parentId) : undefined;
+        while (current) {
+            ancestry.unshift(current);
+            current = current.parentId ? nodeMap.get(current.parentId) : undefined;
+        }
+        return { node, ancestry };
+    };
+
+    const createToggleHandler = async (
+        nodeId: string,
+        nodeType: MindMapNode['type'],
+        childType: MindMapNode['type'],
+        childWidth: number,
+        childHeight: number,
+        generationFn: (context: any) => Promise<any[]>,
+        childContentKey: string,
+        childLabelKey: string
+    ) => {
+        const result = findNodeAndAncestry(nodeId, nodes);
+        if (!result || result.node.type !== nodeType || !campaignBlueprint) return;
+
+        const { node: targetNode, ancestry } = result;
+        const isExpanding = !targetNode.isExpanded;
+        const hasChildren = nodes.some(n => n.parentId === nodeId);
+
+        setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, isExpanded: isExpanding } : n)));
+
+        if (isExpanding && !hasChildren) {
+            setIsLoading(true);
+            setLoadingMessage(`Generating ${childType} nodes...`);
+            try {
+                const context = {
+                    blueprint: campaignBlueprint,
+                    persona: (ancestry.find(a => a.type === 'persona')?.content as { persona: TargetPersona } | undefined)?.persona || (targetNode.content as { persona: TargetPersona }).persona,
+                    painDesire: (targetNode.content as { painDesire: PainDesireObject }).painDesire,
+                    objection: (targetNode.content as { objection: ObjectionObject }).objection,
+                    offer: (targetNode.content as { offer: OfferTypeObject }).offer,
+                    awareness: (targetNode.content as { awareness: AwarenessStage }).awareness,
+                    angle: (targetNode.content as { angle: string }).angle,
+                    trigger: (targetNode.content as { trigger: BuyingTriggerObject }).trigger,
+                    format: (targetNode.content as { format: CreativeFormat }).format,
+                };
+
+                const items = await generationFn(context);
+                // FIX: Cast the dynamically created content object to the MindMapNode['content'] type to resolve TypeScript error.
+                const newNodes: MindMapNode[] = items.map(item => ({
+                    id: simpleUUID(),
+                    parentId: nodeId,
+                    type: childType,
+                    label: item[childLabelKey],
+                    content: { [childContentKey]: item } as MindMapNode['content'],
+                    position: { x: 0, y: 0 },
+                    width: childWidth,
+                    height: childHeight,
+                    isExpanded: false,
+                }));
+                setNodes(prev => [...prev, ...newNodes]);
+            } catch (e: any) {
+                setError(e.message || `Failed to generate ${childType}s.`);
+                setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, isExpanded: false } : n)));
+            } finally {
+                setIsLoading(false);
+                setLoadingMessage('');
+            }
+        }
+    };
+    
+    const createStaticToggleHandler = (nodeId: string, nodeType: MindMapNode['type'], childType: MindMapNode['type'], childContentKey: string, staticItems: readonly any[], childWidth: number, childHeight: number) => {
+        const targetNode = nodes.find(n => n.id === nodeId);
+        if (!targetNode || targetNode.type !== nodeType) return;
+        
+        const isExpanding = !targetNode.isExpanded;
+        const hasChildren = nodes.some(n => n.parentId === nodeId);
+        
+        setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, isExpanded: isExpanding } : n));
+        
+        if(isExpanding && !hasChildren) {
+            // FIX: Cast the dynamically created content object to the MindMapNode['content'] type to resolve TypeScript error.
+            const newNodes: MindMapNode[] = staticItems.map(item => ({
+                id: simpleUUID(),
+                parentId: nodeId,
+                type: childType,
+                label: item,
+                content: { [childContentKey]: item } as MindMapNode['content'],
+                position: { x: 0, y: 0 },
+                width: childWidth,
+                height: childHeight,
+                isExpanded: false
+            }));
+            setNodes(prev => [...prev, ...newNodes]);
+        }
+    };
+
+    const handleTogglePersona = (nodeId: string) => createToggleHandler(nodeId, 'persona', 'pain_desire', 250, 150, (ctx) => generatePainDesires(ctx.blueprint, ctx.persona), 'painDesire', 'name');
+    const handleTogglePainDesire = (nodeId: string) => createToggleHandler(nodeId, 'pain_desire', 'objection', 250, 150, (ctx) => generateObjections(ctx.blueprint, ctx.persona, ctx.painDesire), 'objection', 'name');
+    const handleToggleObjection = (nodeId: string) => createToggleHandler(nodeId, 'objection', 'offer', 250, 150, (ctx) => generateOfferTypes(ctx.blueprint, ctx.persona, ctx.objection), 'offer', 'name');
+    const handleToggleOffer = (nodeId: string) => createStaticToggleHandler(nodeId, 'offer', 'awareness', 'awareness', ALL_AWARENESS_STAGES, 200, 80);
+    const handleToggleAwareness = (nodeId: string) => createToggleHandler(nodeId, 'awareness', 'angle', 250, 120, (ctx) => generateHighLevelAngles(ctx.blueprint, ctx.persona, ctx.awareness, ctx.objection, ctx.painDesire, ctx.offer), 'angle', 'toString');
+    const handleToggleAngle = (nodeId: string) => createToggleHandler(nodeId, 'angle', 'trigger', 250, 120, (ctx) => generateBuyingTriggers(ctx.blueprint, ctx.persona, ctx.angle, ctx.awareness), 'trigger', 'name');
+    const handleToggleTrigger = (nodeId: string) => createStaticToggleHandler(nodeId, 'trigger', 'format', 'format', ALL_CREATIVE_FORMATS, 200, 80);
+    const handleToggleFormat = (nodeId: string) => createStaticToggleHandler(nodeId, 'format', 'placement', 'placement', ALL_PLACEMENT_FORMATS, 200, 80);
+    
+    const handleTogglePlacement = async (nodeId: string, options?: { isUgcPack?: boolean, preferredCarouselArc?: string }) => {
+        const result = findNodeAndAncestry(nodeId, nodes);
+        if (!result || result.node.type !== 'placement' || !campaignBlueprint) return;
+        const { node: targetNode, ancestry } = result;
+
+        const isExpanding = !targetNode.isExpanded;
+        const hasChildren = nodes.some(n => n.parentId === nodeId);
+        setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, isExpanded: isExpanding } : n)));
+        
+        if (isExpanding && !hasChildren) {
+             setIsLoading(true);
+             setLoadingMessage('Generating creative concepts...');
+             try {
+                const persona = (ancestry.find(a => a.type === 'persona')?.content as { persona: TargetPersona }).persona;
+                const angle = (ancestry.find(a => a.type === 'angle')?.content as { angle: string }).angle;
+                const trigger = (ancestry.find(a => a.type === 'trigger')?.content as { trigger: BuyingTriggerObject }).trigger;
+                const awareness = (ancestry.find(a => a.type === 'awareness')?.content as { awareness: AwarenessStage }).awareness;
+                const format = (ancestry.find(a => a.type === 'format')?.content as { format: CreativeFormat }).format;
+                const offer = (ancestry.find(a => a.type === 'offer')?.content as { offer: OfferTypeObject }).offer;
+                const placement = (targetNode.content as { placement: PlacementFormat }).placement;
+
+                const ideas = await generateCreativeIdeas(campaignBlueprint, angle, trigger, awareness, format, placement, persona, nodeId, allowVisualExploration, offer, options?.preferredCarouselArc);
+
+                const newNodes: MindMapNode[] = ideas.map(concept => ({
+                    id: concept.id,
+                    parentId: nodeId,
+                    type: 'creative',
+                    label: concept.headline,
+                    content: { concept },
+                    position: { x: 0, y: 0 },
+                    width: 160,
+                    height: 240,
+                }));
+                setNodes(prev => [...prev, ...newNodes]);
+            } catch(e: any) {
+                 setError(e.message || 'Failed to generate concepts.');
+                 setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, isExpanded: false } : n));
+            } finally {
+                setIsLoading(false);
+                setLoadingMessage('');
+            }
+        }
+    };
+
+    const handleDeleteNode = (nodeId: string) => {
+        if (!window.confirm("Yakin ingin menghapus node ini beserta turunannya? Aksi ini tidak dapat dibatalkan.")) return;
+        setNodes(prev => {
+            const nodesToDelete = new Set<string>();
+            const queue = [nodeId];
+            nodesToDelete.add(nodeId);
+            while (queue.length > 0) {
+                const currentId = queue.shift()!;
+                const children = prev.filter(n => n.parentId === currentId);
+                children.forEach(child => {
+                    nodesToDelete.add(child.id);
+                    queue.push(child.id);
+                });
+            }
+            return prev.filter(n => !nodesToDelete.has(n.id));
+        });
+    };
+
+    const handleGenerateConceptsForPersona = async (personaNodeId: string) => {
+        const personaNode = nodes.find(n => n.id === personaNodeId);
+        if(!personaNode || personaNode.type !== 'persona' || !campaignBlueprint) return;
+        
+        setIsLoading(true);
+        setLoadingMessage(`Generating concept pack for ${personaNode.label}...`);
+        try {
+            const { persona } = personaNode.content as { persona: TargetPersona };
+            const concepts = await generateConceptsFromPersona(campaignBlueprint, persona, personaNodeId);
+            const newNodes: MindMapNode[] = concepts.map(c => ({
+                id: c.id,
+                parentId: personaNodeId,
+                type: 'creative',
+                label: c.headline,
+                content: { concept: c },
+                position: {x: 0, y: 0},
+                width: 160,
+                height: 240,
+            }));
+            setNodes(prev => [...prev, ...newNodes]);
+            if(!personaNode.isExpanded) {
+                setNodes(prev => prev.map(n => n.id === personaNodeId ? {...n, isExpanded: true} : n));
+            }
+        } catch (e: any) {
+            setError(e.message || 'Failed to quick-generate concepts.');
+        } finally {
+            setIsLoading(false);
+            setLoadingMessage('');
+        }
+    }
   const allConcepts = useMemo(() => {
     return nodes
         .filter(node => node.type === 'creative')
@@ -310,21 +513,52 @@ const handleGenerateMatrixCampaign = async (validatedBlueprint: CampaignBlueprin
       case 'dashboard':
         return (
             <div className="relative w-full h-screen">
-                <ConceptDashboard 
-                    nodes={nodes}
-                    concepts={allConcepts}
-                    editingConcept={editingConcept}
-                    campaignBlueprint={campaignBlueprint}
-                    isLoading={isLoading}
-                    onGenerateImage={handleGenerateImage}
-                    onGenerateFilteredImages={handleGenerateFilteredImages}
-                    onEditConcept={handleEditConcept}
-                    onSaveConcept={handleSaveConcept}
-                    onBatchTagConcepts={handleBatchTagConcepts}
-                    onCloseModal={handleCloseModal}
-                    onReset={handleReset}
-                    onOpenLightbox={(concept, startIndex) => setLightboxData({ concept, startIndex })}
-                />
+                {viewMode === 'dashboard' ? (
+                    <ConceptDashboard 
+                        nodes={nodes}
+                        concepts={allConcepts}
+                        editingConcept={editingConcept}
+                        campaignBlueprint={campaignBlueprint}
+                        isLoading={isLoading}
+                        onGenerateImage={handleGenerateImage}
+                        onGenerateFilteredImages={handleGenerateFilteredImages}
+                        onEditConcept={handleEditConcept}
+                        onSaveConcept={handleSaveConcept}
+                        onBatchTagConcepts={handleBatchTagConcepts}
+                        onCloseModal={handleCloseModal}
+                        onReset={handleReset}
+                        onOpenLightbox={(concept, startIndex) => setLightboxData({ concept, startIndex })}
+                        viewMode={viewMode}
+                        onSetViewMode={setViewMode}
+                    />
+                ) : (
+                    <MindMapView
+                        nodes={nodes}
+                        campaignBlueprint={campaignBlueprint}
+                        onGenerateImage={handleGenerateImage}
+                        onEditConcept={handleEditConcept}
+                        onSaveConcept={handleSaveConcept}
+                        onOpenLightbox={(concept, startIndex) => setLightboxData({ concept, startIndex })}
+                        viewMode={viewMode}
+                        onSetViewMode={setViewMode}
+                        onDeleteNode={handleDeleteNode}
+                        onTogglePersona={handleTogglePersona}
+                        onTogglePainDesire={handleTogglePainDesire}
+                        onToggleObjection={handleToggleObjection}
+                        onToggleOffer={handleToggleOffer}
+                        onToggleAwareness={handleToggleAwareness}
+                        onToggleAngle={handleToggleAngle}
+                        onToggleTrigger={handleToggleTrigger}
+                        onToggleFormat={handleToggleFormat}
+                        onTogglePlacement={handleTogglePlacement}
+                        onGenerateConceptsForPersona={handleGenerateConceptsForPersona}
+                        // Placeholders for unimplemented features
+                        onScaleWinner={(c) => alert(`Scaling winner: ${c.headline}`)}
+                        onReset={handleReset}
+                        onGenerateMorePersonas={() => alert('Generating more personas...')}
+                        onAddCustomPersona={() => alert('Adding custom persona...')}
+                    />
+                )}
             </div>
         );
 

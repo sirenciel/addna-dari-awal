@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 // Impor Tipe (Tidak berubah)
-import { MindMapNode, AdConcept, CampaignBlueprint, TargetPersona } from '../types';
+import { MindMapNode, AdConcept, CampaignBlueprint, TargetPersona, ViewMode } from '../types';
 
 // Impor Komponen (FilterControls tetap digunakan)
 import { FilterControls, GalleryFilters } from './FilterControls';
@@ -12,7 +12,7 @@ import { CreativeCard } from './CreativeCard';
 import { 
     RefreshCwIcon, SparklesIcon, TagIcon, DownloadIcon, ShieldAlertIcon,
     TargetIcon, TrophyIcon, FlaskConicalIcon, PackageIcon, Settings2Icon,
-    RocketIcon, HomeIcon, UserSquareIcon
+    RocketIcon, HomeIcon, UserSquareIcon, LayoutGridIcon, NetworkIcon
 } from './icons'; 
 
 import { exportConceptsToZip } from '../services/exportService';
@@ -32,6 +32,8 @@ interface ConceptDashboardProps {
   onCloseModal: () => void;
   onReset: () => void;
   onOpenLightbox: (concept: AdConcept, startIndex: number) => void;
+  viewMode: ViewMode;
+  onSetViewMode: (mode: ViewMode) => void;
 }
 
 const CONCEPT_STATUSES: AdConcept['performanceData']['status'][] = ['Testing', 'Winner', 'Failed', 'Pending'];
@@ -74,7 +76,7 @@ const StatCard: React.FC<{ title: string, value: string | number, icon: React.Re
 
 // --- Komponen Utama: ConceptDashboard ---
 export const ConceptDashboard: React.FC<ConceptDashboardProps> = (props) => {
-  const { concepts, nodes, onReset, isLoading, onGenerateFilteredImages, onBatchTagConcepts } = props;
+  const { concepts, nodes, onReset, isLoading, onGenerateFilteredImages, onBatchTagConcepts, viewMode, onSetViewMode } = props;
 
   // --- State Management ---
   const [filters, setFilters] = useState<GalleryFilters>({
@@ -343,10 +345,12 @@ export const ConceptDashboard: React.FC<ConceptDashboardProps> = (props) => {
           <div className="bg-gray-800/50 p-3 rounded-xl shadow-inner border border-gray-700">
             <h3 className="text-sm font-semibold text-gray-300 mb-2">📈 Tingkat Keberhasilan Titik Masuk</h3>
             <div className="grid grid-cols-2 gap-2">
-              {Object.entries(entryPointStats).filter(([, s]) => s.total > 0).map(([key, value]) => {
-                const winRate = value.total > 0 ? Math.round(value.winners / value.total * 100) : 0;
+              {/* FIX: Explicitly cast `s` and `value` from Object.entries, as TypeScript may infer them as `unknown`. */}
+              {Object.entries(entryPointStats).filter(([, s]) => (s as { total: number }).total > 0).map(([key, value]) => {
+                const stats = value as { total: number, winners: number };
+                const winRate = stats.total > 0 ? Math.round(stats.winners / stats.total * 100) : 0;
                 return (
-                  <div key={key} className="bg-gray-800 p-2 rounded-lg" title={`${value.winners}/${value.total} Pemenang`}>
+                  <div key={key} className="bg-gray-800 p-2 rounded-lg" title={`${stats.winners}/${stats.total} Pemenang`}>
                     <div className="flex justify-between items-center mb-1">
                       <span className="text-xs font-medium text-gray-400">{key}</span>
                       <span className="text-xs font-bold text-green-400">{winRate}%</span>
@@ -414,12 +418,24 @@ export const ConceptDashboard: React.FC<ConceptDashboardProps> = (props) => {
 
             {/* Baris Bawah: Filter & Aksi Cepat */}
             <div className="flex items-center justify-between gap-4">
-                <div className="flex-grow">
+                <div className="flex items-center gap-4 flex-grow">
+                     <div className="flex items-center gap-1 p-1 bg-gray-900 rounded-lg">
+                        <button
+                            onClick={() => onSetViewMode('dashboard')}
+                            className={`px-3 py-1.5 text-sm font-semibold rounded-md flex items-center gap-2 transition-colors ${viewMode === 'dashboard' ? 'bg-brand-primary text-white' : 'text-brand-text-secondary hover:bg-gray-700'}`}
+                        >
+                            <LayoutGridIcon className="w-4 h-4" /> Gallery
+                        </button>
+                        <button
+                            onClick={() => onSetViewMode('mindmap')}
+                            className={`px-3 py-1.5 text-sm font-semibold rounded-md flex items-center gap-2 transition-colors ${viewMode === 'mindmap' ? 'bg-brand-primary text-white' : 'text-brand-text-secondary hover:bg-gray-700'}`}
+                        >
+                            <NetworkIcon className="w-4 h-4" /> Mind Map
+                        </button>
+                    </div>
                     <FilterControls 
                         nodes={nodes} 
                         concepts={concepts}
-                        // CATATAN: Filter 'persona' kini dikontrol oleh sidebar
-                        // Idealnya, FilterControls akan di-update untuk menyembunyikan dropdown persona
                         onFilterChange={(newFilters: GalleryFilters) => setFilters(f => ({...f, ...newFilters}))} 
                     />
                 </div>

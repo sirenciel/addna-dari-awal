@@ -1,0 +1,951 @@
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { CampaignBlueprint, MindMapNode, AdConcept, AwarenessStage, CreativeFormat, PlacementFormat, TargetPersona, BuyingTriggerObject, ObjectionObject, PainDesireObject, OfferTypeObject } from '../types';
+import { RefreshCwIcon, ZoomInIcon, ZoomOutIcon, LocateIcon, Trash2Icon, UsersIcon, FireIcon, ShieldAlertIcon, HeartIcon, HeartCrackIcon, TagIcon, ZapIcon, LayoutGridIcon } from './icons';
+import { CreativeCard } from './CreativeCard';
+import { CAROUSEL_ARCS } from '../services/geminiService'; // Memastikan service diimpor
+
+// --- Konstanta Layout (dari versi lengkap Anda) ---
+const X_SPACING_PERSONA = 350;
+const X_SPACING_PAIN_DESIRE = 300;
+const X_SPACING_OBJECTION = 300;
+const X_SPACING_OFFER = 300;
+const X_SPACING_AWARENESS = 300;
+const X_SPACING_ANGLE = 300;
+const X_SPACING_TRIGGER = 300;
+const X_SPACING_FORMAT = 300;
+const X_SPACING_PLACEMENT = 300;
+const X_SPACING_CREATIVE = 260;
+
+const Y_SPACING_PERSONA = 40;
+const Y_SPACING_PAIN_DESIRE = 30;
+const Y_SPACING_OBJECTION = 30;
+const Y_SPACING_OFFER = 30;
+const Y_SPACING_AWARENESS = 30;
+const Y_SPACING_ANGLE = 40;
+const Y_SPACING_TRIGGER = 30;
+const Y_SPACING_FORMAT = 30;
+const Y_SPACING_PLACEMENT = 20;
+const Y_SPACING_CREATIVE = 30;
+
+// --- Komponen Tooltip ---
+const Tooltip: React.FC<{ content: React.ReactNode; x: number; y: number }> = ({ content, x, y }) => {
+    const tooltipRef = useRef<HTMLDivElement>(null);
+    const [position, setPosition] = useState({ top: y + 20, left: x + 20 });
+
+    useEffect(() => {
+        if (tooltipRef.current) {
+            const rect = tooltipRef.current.getBoundingClientRect();
+            const newPos = { top: y + 20, left: x + 20 };
+
+            if (newPos.left + rect.width > window.innerWidth - 10) {
+                newPos.left = x - rect.width - 20;
+            }
+            if (newPos.top + rect.height > window.innerHeight - 10) {
+                newPos.top = y - rect.height - 20;
+            }
+            setPosition(newPos);
+        }
+    }, [x, y, content]);
+
+
+    return (
+        <div
+            ref={tooltipRef}
+            role="tooltip"
+            className="fixed max-w-sm bg-brand-surface/90 backdrop-blur-md border border-gray-600 rounded-lg p-3 shadow-2xl z-50 text-sm text-brand-text-secondary pointer-events-none animate-fadeIn"
+            style={{ top: position.top, left: position.left }}
+        >
+            {content}
+        </div>
+    );
+};
+
+
+// --- Komponen Node (Lengkap) ---
+// (Ini adalah versi lengkap dari file Anda sebelumnya, menggantikan 'GenericNode')
+
+const DnaNode: React.FC<{ node: MindMapNode }> = ({ node }) => {
+    const blueprint = node.content as CampaignBlueprint;
+    // Ambil gambar referensi dari state global jika tersedia
+    const referenceImage = (window as any).appState?.referenceImage ?? '';
+
+    return (
+        <div className="p-4 bg-brand-surface border-2 border-brand-primary rounded-xl shadow-2xl w-full h-full flex flex-col">
+            <h3 className="text-center font-bold text-lg mb-2 uppercase tracking-wider">Campaign Blueprint</h3>
+            {referenceImage && (
+                <div className="aspect-square bg-gray-900 rounded-md overflow-hidden mb-3">
+                    <img src={`data:image/jpeg;base64,${referenceImage}`} alt="Reference Ad" className="w-full h-full object-cover" />
+                </div>
+            )}
+            <div className="text-xs space-y-1.5 text-brand-text-secondary overflow-y-auto pr-2">
+                <p><strong className="text-brand-text-primary">Product:</strong> {blueprint.productAnalysis.name}</p>
+                <p><strong className="text-brand-text-primary">Key Benefit:</strong> {blueprint.productAnalysis.keyBenefit}</p>
+                <p><strong className="text-brand-text-primary">Initial Persona:</strong> {blueprint.targetPersona.description}</p>
+            </div>
+        </div>
+    );
+};
+
+const PersonaNode: React.FC<{ 
+    node: MindMapNode, 
+    onToggle: (id: string) => void,
+    onGenerateConcepts: (id: string) => void,
+    hasPainDesireChildren: boolean
+}> = ({ node, onToggle, onGenerateConcepts, hasPainDesireChildren }) => {
+    const { persona } = node.content as { persona: TargetPersona };
+    return (
+        <div
+            className={`relative p-3 w-full h-full rounded-lg shadow-lg flex flex-col justify-between text-center transition-all duration-300
+            ${node.isExpanded
+                ? 'bg-brand-surface border-2 border-gray-700'
+                : 'bg-purple-600 hover:bg-purple-500 border-2 border-purple-600 transform hover:scale-105 cursor-pointer'}`
+            }
+            onClick={!node.isExpanded ? () => onToggle(node.id) : undefined}
+        >
+            <UsersIcon className="w-5 h-5 absolute top-2 right-2 text-purple-200" />
+            <div>
+                <h4 className="font-bold text-base line-clamp-2">{persona.description}</h4>
+                 <div className="flex justify-center gap-2 mt-1">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${node.isExpanded ? 'bg-gray-800 text-gray-300' : 'bg-purple-700 text-purple-100'}`}>{persona.age}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${node.isExpanded ? 'bg-gray-800 text-gray-300' : 'bg-purple-700 text-purple-100'}`}>{persona.creatorType}</span>
+                </div>
+            </div>
+            {node.isExpanded ? (
+                <div className="mt-auto pt-2 space-y-2">
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onGenerateConcepts(node.id); }}
+                        className="w-full text-xs bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 p-2 rounded-md flex items-center justify-center gap-1 font-bold"
+                        title="Quickly generate a diverse set of ad concepts for this persona."
+                    >
+                        <ZapIcon className="w-3 h-3" /> Quick-Generate Concepts
+                    </button>
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onToggle(node.id); }}
+                        className="w-full text-xs bg-gray-700 hover:bg-gray-600 p-2 rounded-md"
+                    >
+                        {hasPainDesireChildren ? (node.isExpanded ? 'Hide Manual Exploration' : 'Show Manual Exploration') : 'Explore Pain/Desire Manually'}
+                    </button>
+                </div>
+            ) : (
+                 <p className="text-xs text-purple-200 mt-2">Click to explore</p>
+            )}
+        </div>
+    );
+};
+
+const PainDesireNode: React.FC<{ node: MindMapNode, onToggle: (id: string) => void }> = ({ node, onToggle }) => {
+    const { painDesire } = node.content as { painDesire: PainDesireObject };
+    const isPain = painDesire.type === 'Pain';
+    const bgColor = isPain ? 'bg-rose-600 hover:bg-rose-500 border-rose-600' : 'bg-emerald-600 hover:bg-emerald-500 border-emerald-600';
+    const iconColor = isPain ? 'text-rose-200' : 'text-emerald-200';
+    const textColor = isPain ? 'text-rose-100' : 'text-emerald-100';
+    const promptText = 'Click to analyze objections';
+    return (
+        <div
+            onClick={() => onToggle(node.id)}
+            className={`relative p-3 w-full h-full rounded-lg shadow-lg flex flex-col justify-between text-center transition-all duration-300 cursor-pointer
+            ${node.isExpanded
+                ? 'bg-brand-surface border-2 border-gray-700'
+                : `${bgColor} transform hover:scale-105`
+            }`
+            }
+        >
+            {isPain ? <HeartCrackIcon className={`w-5 h-5 absolute top-2 right-2 ${iconColor}`} /> : <HeartIcon className={`w-5 h-5 absolute top-2 right-2 ${iconColor}`} />}
+            <div>
+                <h4 className="font-bold text-base line-clamp-2">{painDesire.name}</h4>
+                <p className={`text-xs mt-1 line-clamp-2 ${node.isExpanded ? 'text-gray-400' : textColor}`}>{painDesire.description}</p>
+            </div>
+            {!node.isExpanded && (
+                 <p className={`text-xs mt-2 ${textColor}`}>{promptText}</p>
+            )}
+        </div>
+    );
+};
+
+const ObjectionNode: React.FC<{ node: MindMapNode, onToggle: (id: string) => void }> = ({ node, onToggle }) => {
+    const { objection } = node.content as { objection: ObjectionObject };
+    return (
+        <div
+            onClick={() => onToggle(node.id)}
+            className={`relative p-3 w-full h-full rounded-lg shadow-lg flex flex-col justify-between text-center transition-all duration-300 cursor-pointer
+            ${node.isExpanded
+                ? 'bg-brand-surface border-2 border-gray-700'
+                : 'bg-red-600 hover:bg-red-500 border-2 border-red-600 transform hover:scale-105'}`
+            }
+        >
+            <ShieldAlertIcon className="w-5 h-5 absolute top-2 right-2 text-red-200" />
+            <div>
+                <h4 className="font-bold text-base line-clamp-2">{objection.name}</h4>
+                 <p className="text-xs text-red-200 mt-1 line-clamp-2">{objection.description}</p>
+            </div>
+            {!node.isExpanded && (
+                 <p className="text-xs text-red-100 mt-2">Click for offer ideas</p>
+            )}
+        </div>
+    );
+};
+
+const OfferNode: React.FC<{ node: MindMapNode, onToggle: (id: string) => void }> = ({ node, onToggle }) => {
+    const { offer } = node.content as { offer: OfferTypeObject };
+    return (
+        <div
+            onClick={() => onToggle(node.id)}
+            className={`relative p-3 w-full h-full rounded-lg shadow-lg flex flex-col justify-between text-center transition-all duration-300 cursor-pointer
+            ${node.isExpanded
+                ? 'bg-brand-surface border-2 border-gray-700'
+                : 'bg-cyan-600 hover:bg-cyan-500 border-2 border-cyan-600 transform hover:scale-105'}`
+            }
+        >
+            <TagIcon className="w-5 h-5 absolute top-2 right-2 text-cyan-200" />
+            <div>
+                <h4 className="font-bold text-base line-clamp-2">{offer.name}</h4>
+                <p className={`text-xs mt-1 line-clamp-2 ${node.isExpanded ? 'text-gray-400' : 'text-cyan-100'}`}>{offer.description}</p>
+            </div>
+            {!node.isExpanded && (
+                 <p className="text-xs text-cyan-100 mt-2">Click to select stage</p>
+            )}
+        </div>
+    );
+};
+
+const AwarenessStageNode: React.FC<{ node: MindMapNode, onToggle: (id: string) => void }> = ({ node, onToggle }) => (
+    <div
+        onClick={() => onToggle(node.id)}
+        className={`p-3 w-full h-full rounded-lg shadow-lg flex items-center justify-center text-center transition-all duration-300 cursor-pointer
+            ${node.isExpanded
+                ? 'bg-brand-surface border-2 border-gray-600'
+                : 'bg-yellow-600 hover:bg-yellow-500 border-2 border-yellow-600 transform hover:scale-105'}`
+        }
+    >
+        <div>
+            <h4 className="font-semibold text-md">{node.label}</h4>
+            {!node.isExpanded && (
+                 <p className="text-xs text-yellow-100 mt-1">Click to create angles</p>
+            )}
+        </div>
+    </div>
+);
+
+const AngleNode: React.FC<{ node: MindMapNode; onToggle: (id: string) => void; onEducationHover: (type: 'angle' | 'trigger' | null, event: React.MouseEvent | null) => void; }> = ({ node, onToggle, onEducationHover }) => (
+    <div
+        onClick={() => onToggle(node.id)}
+        className={`relative p-4 w-full h-full rounded-lg shadow-lg flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer
+            ${node.isExpanded
+                ? 'bg-brand-surface border-2 border-gray-700'
+                : 'bg-brand-primary hover:bg-indigo-500 border-2 border-brand-primary transform hover:scale-105'}`
+        }
+    >
+        <div className="w-full text-center" onMouseEnter={(e) => onEducationHover('angle', e)} onMouseLeave={() => onEducationHover(null, null)}>
+            <p className="text-xs font-semibold text-indigo-200 uppercase tracking-wider">Strategic Angle</p>
+        </div>
+        <div>
+            <h4 className="font-bold text-base mt-1">{node.label}</h4>
+            {!node.isExpanded && <p className="text-xs text-indigo-200 mt-2">Click to create triggers</p>}
+        </div>
+    </div>
+);
+
+const TriggerNode: React.FC<{ node: MindMapNode; onToggle: (id: string) => void; onEducationHover: (type: 'angle' | 'trigger' | null, event: React.MouseEvent | null) => void; }> = ({ node, onToggle, onEducationHover }) => (
+    <div
+        onClick={() => onToggle(node.id)}
+        className={`relative p-3 w-full h-full rounded-lg shadow-lg flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer
+            ${node.isExpanded
+                ? 'bg-brand-surface border-2 border-gray-600'
+                : 'bg-orange-600 hover:bg-orange-500 border-2 border-orange-600 transform hover:scale-105'}`
+        }
+    >
+        <FireIcon className="w-4 h-4 absolute top-2 right-2 text-orange-200" />
+        <div className="w-full text-center" onMouseEnter={(e) => onEducationHover('trigger', e)} onMouseLeave={() => onEducationHover(null, null)}>
+            <p className="text-xs font-semibold text-orange-200 uppercase tracking-wider">Psychological Trigger</p>
+        </div>
+        <div>
+            <h4 className="font-semibold text-md mt-1">Trigger: {node.label}</h4>
+            {!node.isExpanded && (
+                 <p className="text-xs text-orange-100 mt-1">Click to create formats</p>
+            )}
+        </div>
+    </div>
+);
+
+const FormatNode: React.FC<{ node: MindMapNode, onToggle: (id: string) => void }> = ({ node, onToggle }) => (
+    <div
+        onClick={() => onToggle(node.id)}
+        className={`p-3 w-full h-full rounded-lg shadow-lg flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer
+            ${node.isExpanded
+                ? 'bg-brand-surface border-2 border-gray-600'
+                : 'bg-brand-secondary hover:bg-green-500 border-2 border-brand-secondary transform hover:scale-105'}`
+        }
+    >
+        <div>
+            <p className="text-xs font-semibold text-green-200 uppercase tracking-wider">Communication Format</p>
+        </div>
+        <div>
+            <h4 className="font-semibold text-md mt-1">Format: {node.label}</h4>
+            {!node.isExpanded && (
+                 <p className="text-xs text-green-100 mt-1">Click to create placements</p>
+            )}
+        </div>
+    </div>
+);
+
+const PlacementNode: React.FC<{ node: MindMapNode, onClick: (id: string) => void }> = ({ node, onClick }) => (
+    <div
+        onClick={() => onClick(node.id)}
+        className={`p-3 w-full h-full rounded-lg shadow-lg flex items-center justify-center text-center transition-all duration-300 cursor-pointer
+            ${node.isExpanded
+                ? 'bg-brand-surface border-2 border-gray-600'
+                : 'bg-teal-600 hover:bg-teal-500 border-2 border-teal-600 transform hover:scale-105'}`
+        }
+    >
+        <div>
+            <h4 className="font-semibold text-md">{node.label}</h4>
+            {!node.isExpanded && (
+                 <p className="text-xs text-teal-100 mt-1">Click to generate ideas</p>
+            )}
+        </div>
+    </div>
+);
+
+// Komponen Node Utama (Router)
+const NodeComponent: React.FC<{
+    node: MindMapNode;
+    nodes: MindMapNode[];
+    onTogglePersona: (id: string) => void;
+    onTogglePainDesire: (id: string) => void;
+    onToggleObjection: (id: string) => void;
+    onToggleOffer: (id: string) => void;
+    onToggleAngle: (id: string) => void;
+    onToggleTrigger: (id: string) => void;
+    onToggleAwareness: (id: string) => void;
+    onToggleFormat: (id: string) => void;
+    onPlacementClick: (id: string) => void;
+    onGenerateImage: (id: string) => void;
+    onEditConcept: (id: string) => void;
+    onSaveConcept: (id: string, updatedContent: AdConcept) => void;
+    onScaleWinner: (concept: AdConcept) => void;
+    onOpenLightbox: (concept: AdConcept, startIndex: number) => void;
+    onDeleteNode: (id: string) => void;
+    onNodeHover: (id: string | null, event: React.MouseEvent | null) => void;
+    onEducationHover: (type: 'angle' | 'trigger' | null, event: React.MouseEvent | null) => void;
+    onGenerateConceptsForPersona: (id: string) => void;
+}> = (props) => {
+    const { node, nodes, onTogglePersona, onTogglePainDesire, onToggleObjection, onToggleOffer, onToggleAngle, onToggleTrigger, onToggleAwareness, onToggleFormat, onPlacementClick, onDeleteNode, onNodeHover, onEducationHover } = props;
+    
+    const hasPainDesireChildren = useMemo(() => nodes.some(n => n.parentId === node.id && n.type === 'pain_desire'), [nodes, node.id]);
+
+    const creativeCard = node.type === 'creative'
+        ? <CreativeCard node={node} onGenerateImage={props.onGenerateImage} onEditConcept={props.onEditConcept} onOpenLightbox={props.onOpenLightbox} isSelected={false} onSelect={()=>{}} onSaveConcept={props.onSaveConcept} />
+        : null;
+
+    return (
+        <div className="node-container group relative" onMouseEnter={(e) => onNodeHover(node.id, e)} onMouseLeave={() => onNodeHover(null, null)}>
+            {node.type === 'dna' && <DnaNode node={node} />}
+            {node.type === 'persona' && <PersonaNode node={node} onToggle={onTogglePersona} onGenerateConcepts={props.onGenerateConceptsForPersona} hasPainDesireChildren={hasPainDesireChildren}/>}
+            {node.type === 'pain_desire' && <PainDesireNode node={node} onToggle={onTogglePainDesire} />}
+            {node.type === 'objection' && <ObjectionNode node={node} onToggle={onToggleObjection} />}
+            {node.type === 'offer' && <OfferNode node={node} onToggle={onToggleOffer} />}
+            {node.type === 'awareness' && <AwarenessStageNode node={node} onToggle={onToggleAwareness} />}
+            {node.type === 'angle' && <AngleNode node={node} onToggle={onToggleAngle} onEducationHover={onEducationHover} />}
+            {node.type === 'trigger' && <TriggerNode node={node} onToggle={onToggleTrigger} onEducationHover={onEducationHover} />}
+            {node.type === 'format' && <FormatNode node={node} onToggle={onToggleFormat} />}
+            {node.type === 'placement' && <PlacementNode node={node} onClick={onPlacementClick} />}
+            {creativeCard}
+            
+            {node.type !== 'dna' && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onDeleteNode(node.id); }}
+                    title="Delete Node"
+                    className="absolute -top-2 -right-2 w-6 h-6 bg-red-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 z-10"
+                >
+                    <Trash2Icon className="w-4 h-4 text-white" />
+                </button>
+            )}
+        </div>
+    );
+};
+
+
+// --- Logika Penataan Letak (Layout) Otomatis (Lengkap) ---
+const calculateLayout = (nodes: MindMapNode[]): MindMapNode[] => {
+    if (nodes.length === 0) return [];
+    
+    const laidOutNodes = new Map<string, MindMapNode>();
+    const childrenMap = new Map<string, MindMapNode[]>();
+    nodes.forEach(node => {
+        const children = childrenMap.get(node.parentId || 'root') || [];
+        children.push(node);
+        childrenMap.set(node.parentId || 'root', children);
+    });
+
+    const dnaNode = nodes.find(n => n.type === 'dna');
+    if (!dnaNode) return nodes;
+
+    const getSubtreeHeight = (nodeId: string): number => {
+        const node = nodes.find(n => n.id === nodeId)!;
+        if (!node.isExpanded) return node.height || 0;
+        
+        const children = childrenMap.get(nodeId) || [];
+        if (children.length === 0) return node.height || 0;
+
+        const Y_SPACING_MAP: Record<string, number> = {
+            'dna': Y_SPACING_PERSONA,
+            'persona': Y_SPACING_PAIN_DESIRE,
+            'pain_desire': Y_SPACING_OBJECTION,
+            'objection': Y_SPACING_OFFER,
+            'offer': Y_SPACING_AWARENESS,
+            'awareness': Y_SPACING_ANGLE,
+            'angle': Y_SPACING_TRIGGER,
+            'trigger': Y_SPACING_FORMAT,
+            'format': Y_SPACING_PLACEMENT,
+            'placement': Y_SPACING_CREATIVE,
+        };
+        const spacing = Y_SPACING_MAP[node.type] || 20;
+
+        // Logika khusus untuk 'placement' atau 'persona' yang memiliki anak 'creative'
+        if (node.type === 'placement' || (node.type === 'persona' && children.some(c => c.type === 'creative'))) {
+            const creatives = children.filter(c => c.type === 'creative');
+            const otherChildren = children.filter(c => c.type !== 'creative');
+            
+            let totalHeight = 0;
+            if(otherChildren.length > 0) {
+                 totalHeight += otherChildren.reduce((acc, child) => {
+                    return acc + getSubtreeHeight(child.id) + spacing;
+                }, -spacing);
+            }
+
+            if (creatives.length > 0) {
+                const groupSize = 3; // Menampilkan 3 kartu kreatif per baris
+                const numRows = Math.ceil(creatives.length / groupSize);
+                const creativeHeight = creatives[0].height || 240;
+                const creativesHeight = (numRows * creativeHeight) + ((numRows - 1) * spacing);
+                totalHeight += (totalHeight > 0 ? spacing * 2 : 0) + creativesHeight;
+            }
+            return Math.max(node.height || 0, totalHeight);
+        }
+
+        // Logika standar untuk node lain
+        const totalChildrenHeight = children.reduce((acc, child) => {
+            return acc + getSubtreeHeight(child.id) + spacing;
+        }, -spacing);
+
+        return Math.max(node.height || 0, totalChildrenHeight);
+    };
+
+
+    dnaNode.position = { x: 50, y: -(dnaNode.height || 0) / 2 };
+    laidOutNodes.set(dnaNode.id, { ...dnaNode });
+    
+    const layoutChildren = (parentId: string, parentX: number, parentY: number, parentHeight: number) => {
+        const children = (childrenMap.get(parentId) || []).sort((a, b) => a.label.localeCompare(b.label));
+        if (children.length === 0) return;
+        
+        const parentNode = nodes.find(n => n.id === parentId)!;
+        
+        const X_SPACING_MAP: Record<string, number> = {
+            'dna': X_SPACING_PERSONA,
+            'persona': X_SPACING_PAIN_DESIRE,
+            'pain_desire': X_SPACING_OBJECTION,
+            'objection': X_SPACING_OFFER,
+            'offer': X_SPACING_AWARENESS,
+            'awareness': X_SPACING_ANGLE,
+            'angle': X_SPACING_TRIGGER,
+            'trigger': X_SPACING_FORMAT,
+            'format': X_SPACING_PLACEMENT,
+            'placement': X_SPACING_CREATIVE,
+        };
+        const xSpacing = X_SPACING_MAP[parentNode.type] || 300;
+        
+        const Y_SPACING_MAP: Record<string, number> = {
+            'dna': Y_SPACING_PERSONA,
+            'persona': Y_SPACING_PAIN_DESIRE,
+            'pain_desire': Y_SPACING_OBJECTION,
+            'objection': Y_SPACING_OFFER,
+            'offer': Y_SPACING_AWARENESS,
+            'awareness': Y_SPACING_ANGLE,
+            'angle': Y_SPACING_TRIGGER,
+            'trigger': Y_SPACING_FORMAT,
+            'format': Y_SPACING_PLACEMENT,
+            'placement': Y_SPACING_CREATIVE,
+        };
+        const ySpacing = Y_SPACING_MAP[parentNode.type] || 20;
+
+        const creatives = children.filter(c => c.type === 'creative');
+        const otherChildren = children.filter(c => c.type !== 'creative');
+        
+        const totalSubtreeHeight = getSubtreeHeight(parentId);
+        let currentChildY = parentY + parentHeight / 2 - totalSubtreeHeight / 2;
+        
+        // Tata letak anak non-kreatif terlebih dahulu
+        otherChildren.forEach(child => {
+            const subtreeHeight = getSubtreeHeight(child.id);
+            child.position = {
+                x: parentX + xSpacing,
+                y: currentChildY + subtreeHeight / 2 - (child.height || 0) / 2
+            };
+            laidOutNodes.set(child.id, { ...child });
+            
+            if (child.isExpanded) {
+                layoutChildren(child.id, child.position.x, child.position.y, child.height || 0);
+            }
+            currentChildY += subtreeHeight + ySpacing;
+        });
+
+        // Tata letak anak kreatif (dalam grid)
+        if (creatives.length > 0) {
+            if(otherChildren.length > 0) {
+                 currentChildY += ySpacing * 2; // Spasi ekstra antara node strategi dan grid kreatif
+            }
+            const groupSize = 3; // 3 kreatif per baris
+            const groupHorizontalSpacing = 40;
+            const groupWidth = (creatives[0]?.width || 160) + groupHorizontalSpacing;
+            const creativeHeight = creatives[0]?.height || 240;
+            
+            const startY = currentChildY;
+
+            creatives.forEach((child, index) => {
+                const rowIndex = index % groupSize;
+                const colIndex = Math.floor(index / groupSize);
+
+                const childX = parentX + xSpacing + (colIndex * groupWidth);
+                const childY = startY + (rowIndex * (creativeHeight + ySpacing));
+
+                child.position = { x: childX, y: childY };
+                laidOutNodes.set(child.id, { ...child });
+            });
+        }
+    };
+    
+    // Panggil layout awal dan pusatkan ulang
+    layoutChildren(dnaNode.id, dnaNode.position.x, dnaNode.position.y, dnaNode.height || 0);
+    
+    const rootSubtreeHeight = getSubtreeHeight(dnaNode.id);
+    const dnaNodeRef = laidOutNodes.get(dnaNode.id);
+    if(dnaNodeRef) {
+        dnaNodeRef.position.y = -rootSubtreeHeight / 2 + (dnaNode.height || 420) / 2;
+        layoutChildren(dnaNode.id, dnaNodeRef.position.x, dnaNodeRef.position.y, dnaNode.height || 0);
+    }
+    
+    return Array.from(laidOutNodes.values());
+};
+
+
+// --- Komponen Kanvas Utama ---
+
+// Ambil semua prop yang diteruskan dari MindMapView (wrapper)
+interface MindMapCanvasProps {
+    nodes: MindMapNode[];
+    onTogglePersona: (nodeId: string) => void;
+    onTogglePainDesire: (nodeId: string) => void;
+    onToggleObjection: (nodeId: string) => void;
+    onToggleOffer: (nodeId: string) => void;
+    onToggleAngle: (nodeId: string) => void;
+    onToggleTrigger: (nodeId: string) => void;
+    onToggleAwareness: (nodeId: string) => void;
+    onToggleFormat: (nodeId: string) => void;
+    onTogglePlacement: (nodeId: string, options?: { isUgcPack?: boolean, preferredCarouselArc?: string }) => void;
+    onGenerateImage: (conceptId: string) => void;
+    onEditConcept: (conceptId: string) => void;
+    onSaveConcept: (id: string, updatedContent: AdConcept) => void;
+    onScaleWinner: (concept: AdConcept) => void;
+    onOpenLightbox: (concept: AdConcept, startIndex: number) => void;
+    onDeleteNode: (nodeId: string) => void;
+    onReset: () => void;
+    onGenerateMorePersonas: () => void;
+    onAddCustomPersona: () => void;
+    onGenerateConceptsForPersona: (nodeId: string) => void;
+}
+
+export const MindMapCanvas: React.FC<MindMapCanvasProps> = (props) => {
+    const { nodes, onTogglePlacement } = props;
+    const [view, setView] = useState({ x: 0, y: 0, k: 0.7 });
+    const containerRef = useRef<HTMLDivElement>(null);
+    const isDragging = useRef(false);
+    const lastPos = useRef({ x: 0, y: 0 });
+    const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+    const [tooltip, setTooltip] = useState<{ content: React.ReactNode; x: number; y: number } | null>(null);
+    const [educationTooltip, setEducationTooltip] = useState<{ content: React.ReactNode; x: number; y: number } | null>(null);
+
+    // State untuk modal pop-up
+    const [ugcModalNodeId, setUgcModalNodeId] = useState<string | null>(null);
+    const [carouselModal, setCarouselModal] = useState<{ nodeId: string; selectedArc: string | null }>({ nodeId: '', selectedArc: null });
+
+    // Gunakan logika layout yang sudah lengkap
+    const laidOutNodes = useMemo(() => calculateLayout(nodes), [nodes]);
+    const nodesMap = useMemo(() => new Map(laidOutNodes.map(node => [node.id, node])), [laidOutNodes]);
+
+    // Handler klik placement untuk memicu modal
+    const handlePlacementClick = (nodeId: string) => {
+        const placementNode = nodesMap.get(nodeId);
+        const formatNode = placementNode?.parentId ? nodesMap.get(placementNode.parentId) : undefined;
+        if (formatNode?.label === 'UGC') {
+            setUgcModalNodeId(nodeId);
+        } else if (formatNode?.label === 'Carousel') {
+            setCarouselModal({ nodeId: nodeId, selectedArc: null });
+        } else {
+            onTogglePlacement(nodeId);
+        }
+    };
+
+    // Logika untuk menentukan node mana yang terlihat
+    const isNodeVisible = (node: MindMapNode, map: Map<string, MindMapNode>): boolean => {
+        if (!node.parentId) return true;
+        let parent = map.get(node.parentId);
+        while (parent) {
+            if (parent.isExpanded === false) return false;
+            parent = parent.parentId ? map.get(parent.parentId) : undefined;
+        }
+        return true;
+    };
+
+    const visibleNodes = useMemo(() => laidOutNodes.filter(node => isNodeVisible(node, nodesMap)), [laidOutNodes, nodesMap]);
+    
+    // Logika untuk highlight jalur saat hover
+    const highlightedPathIds = useMemo(() => {
+        if (!hoveredNodeId) return new Set();
+        const path = new Set<string>();
+        
+        let currentNode = nodesMap.get(hoveredNodeId);
+        while (currentNode) {
+            path.add(currentNode.id);
+            currentNode = currentNode.parentId ? nodesMap.get(currentNode.parentId) : undefined;
+        }
+
+        const queue: string[] = [hoveredNodeId];
+        const visited = new Set<string>([hoveredNodeId]);
+        while (queue.length > 0) {
+            const currentId = queue.shift()!;
+            path.add(currentId);
+            const children = laidOutNodes.filter(n => n.parentId === currentId);
+            for (const child of children) {
+                if (!visited.has(child.id)) {
+                    visited.add(child.id);
+                    queue.push(child.id);
+                }
+            }
+        }
+        return path;
+    }, [hoveredNodeId, nodesMap, laidOutNodes]);
+
+    // Handler untuk tooltip edukasi
+    const handleEducationHover = (type: 'angle' | 'trigger' | null, event: React.MouseEvent | null) => {
+        if (!type || !event) {
+            setEducationTooltip(null);
+            return;
+        }
+        let content = '';
+        if (type === 'angle') content = "Ini adalah 'APA' pesan inti Anda (Strategi Pesan).";
+        if (type === 'trigger') content = "Ini adalah 'BAGAIMANA' Anda menyampaikan pesan (Taktik Psikologis).";
+
+        if (content) {
+            setEducationTooltip({ content, x: event.clientX, y: event.clientY });
+        } else {
+            setEducationTooltip(null);
+        }
+    }
+
+    // Handler untuk tooltip info node
+    const handleNodeHover = (nodeId: string | null, event: React.MouseEvent | null) => {
+        setHoveredNodeId(nodeId);
+
+        if (!nodeId || !event) {
+            setTooltip(null);
+            return;
+        }
+        
+        const node = nodesMap.get(nodeId);
+        if (!node) {
+            setTooltip(null);
+            return;
+        }
+
+        let content: React.ReactNode = null;
+        switch (node.type) {
+            case 'persona':
+                const { persona } = node.content as { persona: TargetPersona };
+                content = (
+                     <div>
+                        <strong className="text-brand-text-primary block">{persona.description}</strong>
+                        <p className="mt-1"><strong>Age:</strong> {persona.age} | <strong>Type:</strong> {persona.creatorType}</p>
+                        <p><strong>Pain Points:</strong> {persona.painPoints.join(', ')}</p>
+                        <p><strong>Desired Outcomes:</strong> {persona.desiredOutcomes.join(', ')}</p>
+                    </div>
+                );
+                break;
+            case 'pain_desire':
+                const { painDesire } = node.content as { painDesire: PainDesireObject };
+                const isPain = painDesire.type === 'Pain';
+                content = (
+                     <div>
+                        <strong className={`text-brand-text-primary block ${isPain ? 'text-rose-400' : 'text-emerald-400'}`}>
+                            {isPain ? 'PAIN' : 'DESIRE'}: {painDesire.name}
+                        </strong>
+                        <p className="mt-1">{painDesire.description}</p>
+                        <p className="mt-2 text-xs italic bg-gray-900 p-2 rounded-md"><strong className="text-brand-text-primary/80 not-italic">Emotional Impact:</strong> {painDesire.emotionalImpact}</p>
+                    </div>
+                );
+                break;
+            case 'objection':
+                const { objection } = node.content as { objection: ObjectionObject };
+                content = (
+                     <div>
+                        <strong className="text-brand-text-primary block">Objection: {objection.name}</strong>
+                        <p className="mt-1">{objection.description}</p>
+                        <p className="mt-2 text-xs italic bg-gray-900 p-2 rounded-md"><strong className="text-brand-text-primary/80 not-italic">Counter-Angle:</strong> {objection.counterAngle}</p>
+                    </div>
+                );
+                break;
+            case 'offer':
+                const { offer } = node.content as { offer: OfferTypeObject };
+                content = (
+                     <div>
+                        <strong className="text-brand-text-primary block">Offer: {offer.name}</strong>
+                        <p className="mt-1">{offer.description}</p>
+                        <p className="mt-2 text-xs italic bg-gray-900 p-2 rounded-md"><strong className="text-brand-text-primary/80 not-italic">Psychological Principle:</strong> {offer.psychologicalPrinciple}</p>
+                    </div>
+                );
+                break;
+            case 'trigger':
+                const { trigger } = node.content as { trigger: BuyingTriggerObject };
+                content = (
+                    <div>
+                        <strong className="text-brand-text-primary block">🔥 {trigger.name}</strong>
+                        <p className="mt-1 border-t border-gray-600 pt-1">{trigger.description}</p>
+                        <p className="mt-2 text-xs italic bg-gray-900 p-2 rounded-md"><strong className="text-brand-text-primary/80 not-italic">Example:</strong> {trigger.example}</p>
+                        {trigger.analysis && (
+                            <p className="mt-2 text-xs bg-yellow-900/50 text-yellow-200 p-2 rounded-md"><strong className="font-bold">Why it works:</strong> {trigger.analysis}</p>
+                        )}
+                    </div>
+                );
+                break;
+            case 'creative':
+                const { concept } = node.content as { concept: AdConcept };
+                 content = (
+                    <div>
+                        <strong className="text-brand-text-primary block">{concept.headline}</strong>
+                        <p className="mt-1">{concept.hook}</p>
+                    </div>
+                );
+                break;
+            default:
+                 content = <strong className="text-brand-text-primary">{node.label}</strong>;
+        }
+
+        if (content) {
+            setTooltip({ content, x: event.clientX, y: event.clientY });
+        }
+    };
+    
+    // Hook untuk Pan & Zoom
+    useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+
+        const handleMouseDown = (e: MouseEvent) => {
+            const target = e.target as HTMLElement;
+            if (target.closest('foreignObject')) return; // Jangan drag jika mengklik node
+            isDragging.current = true;
+            lastPos.current = { x: e.clientX, y: e.clientY };
+            el.style.cursor = 'grabbing';
+        };
+        const handleMouseUp = () => { isDragging.current = false; el.style.cursor = 'grab'; };
+        const handleMouseMove = (e: MouseEvent) => {
+            if (!isDragging.current) return;
+            const dx = e.clientX - lastPos.current.x;
+            const dy = e.clientY - lastPos.current.y;
+            setView(v => ({ ...v, x: v.x + dx, y: v.y + dy }));
+            lastPos.current = { x: e.clientX, y: e.clientY };
+        };
+        const handleWheel = (e: WheelEvent) => {
+            e.preventDefault();
+            const scaleAmount = 1 - e.deltaY * 0.001;
+            const rect = el.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            setView(v => {
+                const newK = Math.max(0.2, Math.min(2, v.k * scaleAmount));
+                const newX = v.x - (mouseX - v.x) * (newK / v.k - 1);
+                const newY = v.y - (mouseY - v.y) * (newK / v.k - 1);
+                return { x: newX, y: newY, k: newK };
+            });
+        };
+        el.addEventListener('mousedown', handleMouseDown);
+        window.addEventListener('mouseup', handleMouseUp);
+        window.addEventListener('mousemove', handleMouseMove);
+        el.addEventListener('wheel', handleWheel);
+        el.style.cursor = 'grab';
+        return () => {
+            el.removeEventListener('mousedown', handleMouseDown);
+            window.removeEventListener('mouseup', handleMouseUp);
+            window.removeEventListener('mousemove', handleMouseMove);
+            el.removeEventListener('wheel', handleWheel);
+        };
+    }, []);
+
+     // Hook untuk memusatkan tampilan saat pertama kali load
+     useEffect(() => {
+        if(containerRef.current) {
+            const { width, height } = containerRef.current.getBoundingClientRect();
+            setView(v => ({...v, x: width / 2 - 400, y: height / 2}));
+        }
+    }, []);
+
+    // Fungsi untuk memusatkan tampilan
+    const centerView = () => {
+       if(containerRef.current) {
+            const { width, height } = containerRef.current.getBoundingClientRect();
+            setView(v => ({...v, x: width / 2 - 400, y: height / 2, k: 0.7}));
+        }
+    };
+
+    return (
+        <div ref={containerRef} className="w-full h-full relative overflow-hidden bg-brand-background" style={{
+            backgroundImage: 'radial-gradient(circle at 1px 1px, #374151 1px, transparent 0)',
+            backgroundSize: '25px 25px',
+        }}>
+            <style>{`
+                @keyframes fadeIn {
+                    from { opacity: 0; }
+                    to { opacity: 1; }
+                }
+                .animate-fadeIn { animation: fadeIn 0.2s ease-out forwards; }
+
+                @keyframes fadeInScaleUp {
+                    from { opacity: 0; transform: scale(0.95); }
+                    to { opacity: 1; transform: scale(1); }
+                }
+                .node-container { animation: fadeInScaleUp 0.3s ease-out forwards; }
+            `}</style>
+
+            {/* Kontrol UI (Zoom, dll.) */}
+            <div className="absolute top-4 left-4 z-10 flex flex-wrap gap-2">
+                <button onClick={props.onGenerateMorePersonas} className="px-3 py-2 bg-purple-600 rounded-md shadow-lg text-sm font-bold text-white hover:bg-purple-500 flex items-center gap-2">
+                    <RefreshCwIcon className="w-4 h-4" /> Hasilkan Persona Baru
+                </button>
+                <button onClick={props.onAddCustomPersona} className="px-3 py-2 bg-brand-surface rounded-md shadow-lg text-sm font-semibold hover:bg-gray-700">+ Tambah Persona Kustom</button>
+            </div>
+
+            <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
+                <div className="bg-brand-surface p-1 rounded-md shadow-lg flex flex-col">
+                    <button onClick={() => setView(v => ({ ...v, k: Math.min(2, v.k * 1.2) }))} title="Zoom In" className="p-1.5 hover:bg-gray-700 rounded-md"><ZoomInIcon className="w-5 h-5"/></button>
+                    <button onClick={() => setView(v => ({ ...v, k: Math.max(0.2, v.k / 1.2) }))} title="Zoom Out" className="p-1.5 hover:bg-gray-700 rounded-md"><ZoomOutIcon className="w-5 h-5"/></button>
+                    <button onClick={centerView} title="Center View" className="p-1.5 hover:bg-gray-700 rounded-md"><LocateIcon className="w-5 h-5"/></button>
+                </div>
+            </div>
+             
+             {/* Render SVG untuk garis dan node */}
+             <svg className="w-full h-full">
+                <g transform={`translate(${view.x}, ${view.y}) scale(${view.k})`}>
+                    {/* Render Garis Penghubung */}
+                    <g>
+                        {visibleNodes.map(node => {
+                            if (!node.parentId) return null;
+                            const parent = nodesMap.get(node.parentId!);
+                            if (!parent || !parent.position || !node.position) return null;
+                            
+                            const sx = parent.position.x + (parent.width || 0);
+                            const sy = parent.position.y + (parent.height || 0) / 2;
+                            const ex = node.position.x;
+                            const ey = node.position.y + (node.height || 0) / 2;
+                            const cx1 = sx + (ex - sx) * 0.5;
+                            const cx2 = ex - (ex - sx) * 0.5;
+                            const isHighlighted = highlightedPathIds.has(node.id) && highlightedPathIds.has(parent.id);
+
+                            return (
+                                <path
+                                    key={`${parent.id}-${node.id}`}
+                                    d={`M ${sx} ${sy} C ${cx1} ${sy}, ${cx2} ${ey}, ${ex} ${ey}`}
+                                    stroke={isHighlighted ? '#4F46E5' : '#4A5568'}
+                                    strokeWidth={isHighlighted ? 3 : 2}
+                                    fill="none"
+                                    style={{ transition: 'stroke 0.2s, stroke-width 0.2s' }}
+                                />
+                            );
+                        })}
+                    </g>
+                    {/* Render Node (sebagai HTML di dalam SVG) */}
+                    {visibleNodes.map(node => (
+                        <foreignObject key={node.id} x={node.position.x} y={node.position.y} width={node.width} height={node.height} style={{pointerEvents: "auto"}}>
+                            {/* Meneruskan semua prop ke NodeComponent */}
+                            <NodeComponent 
+                                {...props} 
+                                node={node}
+                                onPlacementClick={handlePlacementClick}
+                                onNodeHover={handleNodeHover}
+                                onEducationHover={handleEducationHover}
+                            />
+                        </foreignObject>
+                    ))}
+                </g>
+             </svg>
+             
+             {/* Render Tooltip */}
+             {tooltip && <Tooltip content={tooltip.content} x={tooltip.x} y={tooltip.y} />}
+             {educationTooltip && <Tooltip content={educationTooltip.content} x={educationTooltip.x} y={educationTooltip.y} />}
+             
+             {/* Modal Pop-up untuk UGC */}
+             {ugcModalNodeId && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setUgcModalNodeId(null)}>
+                    <div className="p-6 bg-brand-surface rounded-xl max-w-lg w-full" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-xl font-bold">🎬 Peringatan Praktik Terbaik UGC</h3>
+                        <p className="mt-2 text-brand-text-secondary">Data Meta menunjukkan bahwa <strong>akun UGC dengan 4-5 sudut pandang kreator berperforma 3x lebih baik</strong> daripada UGC dengan satu kreator.</p>
+                        
+                        <div className="mt-4 grid grid-cols-2 gap-4">
+                            <div className="border border-red-500/50 p-3 rounded-lg bg-red-500/10">
+                                <p className="font-bold text-red-400">❌ UGC Berperforma Rendah</p>
+                                <p className="text-sm mt-1">1 kreator, latar belakang sama, variasi sedikit</p>
+                            </div>
+                            <div className="border border-green-500/50 p-3 rounded-lg bg-green-500/10">
+                                <p className="font-bold text-green-400">✅ UGC Berperforma Tinggi</p>
+                                <p className="text-sm mt-1">4-5 kreator, usia/latar/suasana berbeda, pesan inti sama</p>
+                            </div>
+                        </div>
+                        
+                        <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                            <button 
+                                onClick={() => { onTogglePlacement(ugcModalNodeId, { isUgcPack: true }); setUgcModalNodeId(null); }} 
+                                className="flex-1 px-4 py-2 bg-brand-primary text-white font-bold rounded-lg hover:bg-indigo-500"
+                            >
+                                Hasilkan Paket Keragaman 4 Kreator (Disarankan)
+                            </button>
+                            <button 
+                                onClick={() => { onTogglePlacement(ugcModalNodeId, { isUgcPack: false }); setUgcModalNodeId(null); }}
+                                className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
+                            >
+                                Hasilkan 1 Konsep Saja
+                            </button>
+                        </div>
+                    </div>
+                </div>
+             )}
+
+            {/* Modal Pop-up untuk Carousel */}
+            {carouselModal.nodeId && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setCarouselModal({ nodeId: '', selectedArc: null })}>
+                    <div className="p-6 bg-brand-surface rounded-xl max-w-2xl w-full" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-xl font-bold">📖 Pilih Alur Cerita Carousel</h3>
+                        <p className="text-sm mt-1 text-brand-text-secondary">Pilih struktur naratif untuk iklan carousel Anda.</p>
+                        <div className="grid grid-cols-2 gap-4 mt-4">
+                            {Object.entries(CAROUSEL_ARCS).map(([arc, desc]) => (
+                                <div
+                                    key={arc}
+                                    onClick={() => setCarouselModal(prev => ({ ...prev, selectedArc: arc }))}
+                                    className={`p-4 rounded-lg cursor-pointer transition-all ${carouselModal.selectedArc === arc ? 'bg-brand-primary ring-2 ring-white' : 'bg-gray-800 hover:bg-gray-700'}`}
+                                >
+                                    <h4 className="font-bold text-lg">{arc}</h4>
+                                    <p className="text-xs text-gray-300 mt-1">{desc}</p>
+                                </div>
+                            ))}
+                        </div>
+                         <button 
+                            onClick={() => { onTogglePlacement(carouselModal.nodeId, { preferredCarouselArc: carouselModal.selectedArc ?? undefined }); setCarouselModal({ nodeId: '', selectedArc: null }); }}
+                            disabled={!carouselModal.selectedArc}
+                            className="mt-6 w-full px-4 py-2 bg-brand-secondary text-white font-bold rounded-lg hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Hasilkan Konsep Carousel
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
