@@ -60,8 +60,9 @@ export const ALL_AWARENESS_STAGES: AwarenessStage[] = ["Tidak Sadar", "Sadar Mas
 
 export type CreativeFormat = 'UGC' | 'Sebelum & Sesudah' | 'Perbandingan' | 'Demo' | 'Testimoni' | 'Masalah/Solusi' | 'Edukasi/Tips' | 'Bercerita' | 'Iklan Artikel' | 'Layar Terpisah' | 'Advertorial' | 'Listicle' | 'Multi-Produk' | 'Kita vs Mereka' | 'Meme/Iklan Jelek' | 'Penawaran Langsung';
 export const ALL_CREATIVE_FORMATS: CreativeFormat[] = [
-    'UGC', 'Sebelum & Sesudah', 'Perbandingan', 'Demo', 'Testimoni', 'Masalah/Solusi', 'Edukasi/Tips', 'Bercerita',
-    'Iklan Artikel', 'Layar Terpisah', 'Advertorial', 'Listicle', 'Multi-Produk', 'Kita vs Mereka', 'Meme/Iklan Jelek', 'Penawaran Langsung'
+    'UGC', 'Iklan Artikel', 'Advertorial', 'Testimoni', 'Bercerita', 'Masalah/Solusi', 'Edukasi/Tips', 
+    'Sebelum & Sesudah', 'Demo', 'Perbandingan', 'Penawaran Langsung', 'Listicle', 'Layar Terpisah', 
+    'Multi-Produk', 'Kita vs Mereka', 'Meme/Iklan Jelek'
 ];
 
 export type PlacementFormat = 'Carousel' | 'Instagram Story' | 'Instagram Feed';
@@ -74,8 +75,21 @@ export interface CarouselSlide {
   slideNumber: number;
   visualPrompt: string;
   headline: string;
-  textOverlay?: string;
+  hook: string;
   description: string;
+}
+
+export interface TextStyle {
+  fontFamily: string;
+  fontSize: number; // in vw units for scalability
+  fontWeight: string | number;
+  color: string; // hex code
+  top: number; // percentage
+  left: number; // percentage
+  width: number; // percentage
+  textAlign: 'left' | 'center' | 'right';
+  textShadow: string;
+  lineHeight: number; // e.g., 1.2
 }
 
 export interface AdConcept {
@@ -90,15 +104,20 @@ export interface AdConcept {
   visualPrompt: string;
   hook: string;
   headline:string;
-  textOverlay?: string;
   adSetName: string;
   offer: OfferTypeObject;
   carouselSlides?: CarouselSlide[];
   carouselArc?: string;
-  triggerImplementationProof: {
-    copyChecklistItemUsed: string;
-    visualChecklistItemUsed: string;
+  
+  copyQualityValidation?: {
+      valid: boolean;
+      feedback: string;
   };
+  triggerImplementationValidation?: {
+      valid: boolean;
+      feedback: string;
+  };
+  
   // Persona metadata denormalized for easier access and export
   personaDescription: string;
   personaAge: string;
@@ -119,6 +138,9 @@ export interface AdConcept {
     roas?: number;
     status: 'Pending' | 'Testing' | 'Winner' | 'Failed';
   };
+  // V3: AI-powered visual styling
+  headlineStyle?: TextStyle;
+  textOverlayStyle?: TextStyle;
 }
 
 export type NodeType = 'dna' | 'persona' | 'pain_desire' | 'objection' | 'offer' | 'angle' | 'trigger' | 'awareness' | 'format' | 'placement' | 'creative';
@@ -137,7 +159,7 @@ export interface MindMapNode {
   height?: number; // for layout
 }
 
-export type AppStep = 'input' | 'validateBlueprint' | 'dashboard';
+export type AppStep = 'landing' | 'input' | 'validateBlueprint' | 'dashboard';
 export type ViewMode = 'mindmap' | 'gallery';
 
 export type PivotType =

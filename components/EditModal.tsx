@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
-import { AdConcept, CarouselSlide, ALL_AWARENESS_STAGES, ALL_CREATIVE_FORMATS, CreativeFormat, CampaignBlueprint } from '../types';
-import { refineVisualPrompt } from '../services/geminiService';
-import { RefreshCwIcon, SparklesIcon, InfoIcon } from './icons';
+import { AdConcept, CarouselSlide, ALL_AWARENESS_STAGES, ALL_CREATIVE_FORMATS, CreativeFormat, CampaignBlueprint, TextStyle } from '../types';
+import { refineVisualPrompt, getDesignSuggestions } from '../services/geminiService';
+import { RefreshCwIcon, SparklesIcon, InfoIcon, BrushIcon } from './icons';
 
 interface EditModalProps {
   concept: AdConcept;
@@ -10,6 +9,25 @@ interface EditModalProps {
   onSave: (conceptId: string, updatedContent: AdConcept) => void;
   onClose: () => void;
   onGenerateImage: (conceptId: string) => void;
+}
+
+// Helper to fetch base64 from a data URL, needed for AI design suggestions
+const imageUrlToBase64 = async (url: string): Promise<string> => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const result = reader.result as string;
+            if (result && result.includes(',')) {
+                resolve(result.split(',')[1]);
+            } else {
+                reject(new Error("Invalid file data URL."));
+            }
+        };
+        reader.onerror = error => reject(error);
+        reader.readAsDataURL(blob);
+    });
 }
 
 const CAROUSEL_ARC_VALIDATION_RULES: Record<string, Record<string, string>> = {
@@ -50,14 +68,14 @@ const validateCarouselArc = (slides: CarouselSlide[], arc: string) => {
     return slides.map((slide, i) => {
         const slideKey = `slide${i + 1}`;
         const expectedKeyword = rules[slideKey];
-        if (!expectedKeyword) return { slideNumber: i + 1, expected: 'Unknown', isValid: true, actual: slide.headline };
+        if (!expectedKeyword) return { slideNumber: i + 1, expected: 'Unknown', isValid: true, actual: slide.hook };
 
-        // Simple check if headline contains the keyword (case-insensitive)
-        const isValid = slide.headline.toLowerCase().includes(expectedKeyword.toLowerCase());
+        // Simple check if hook contains the keyword (case-insensitive)
+        const isValid = slide.hook.toLowerCase().includes(expectedKeyword.toLowerCase());
         return {
             slideNumber: i + 1,
             expected: expectedKeyword,
-            actual: slide.headline,
+            actual: slide.hook,
             isValid
         };
     });
@@ -74,6 +92,7 @@ const FORMAT_TIPS: Partial<Record<CreativeFormat, string>> = {
 export const EditModal: React.FC<EditModalProps> = ({ concept, campaignBlueprint, onSave, onClose, onGenerateImage }) => {
   const [formData, setFormData] = useState<AdConcept>(concept);
   const [isRefining, setIsRefining] = useState(false);
+  const [isSuggesting, setIsSuggesting] = useState(false);
 
   useEffect(() => {
     setFormData(concept);
@@ -137,92 +156,109 @@ export const EditModal: React.FC<EditModalProps> = ({ concept, campaignBlueprint
     }
   };
 
+  const handleSuggestLayout = async () => {
+    if (!concept.imageUrls || concept.imageUrls.length === 0) {
+        alert("Gambar harus dibuat terlebih dahulu sebelum menyarankan tata letak.");
+        return;
+    }
+    if (!campaignBlueprint) {
+        alert("Blueprint kampanye tidak tersedia.");
+        return;
+    }
+    setIsSuggesting(true);
+    try {
+        const imageBase64 = await imageUrlToBase64(concept.imageUrls[0]);
+        const suggestions = await getDesignSuggestions(formData, imageBase64, campaignBlueprint);
+        setFormData(prev => ({
+            ...prev,
+            headlineStyle: suggestions.headlineStyle,
+            textOverlayStyle: suggestions.textOverlayStyle,
+        }));
+    } catch (e) {
+        console.error("Gagal mendapatkan saran desain:", e);
+        alert("Gagal mendapatkan saran desain AI. Silakan coba lagi.");
+    } finally {
+        setIsSuggesting(false);
+    }
+  };
+
+
   const tip = FORMAT_TIPS[formData.format];
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-brand-surface rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-brand-surface rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <header className="p-4 border-b border-gray-700">
           <h2 className="text-xl font-bold">Edit Konsep Kreatif</h2>
           <p className="text-sm text-brand-text-secondary">Ad Set: {formData.adSetName}</p>
         </header>
         
-        <main className="p-6 space-y-4 overflow-y-auto">
-          <div>
-            <label htmlFor="headline" className="block text-sm font-medium text-brand-text-secondary mb-1">Headline</label>
-            <input type="text" name="headline" id="headline" value={formData.headline} onChange={handleChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary" />
-            {tip && (
-                <div className="mt-2 p-2 bg-blue-900/30 border border-blue-500/40 rounded-md text-xs flex items-start gap-2 text-blue-200">
-                    <InfoIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    <span><strong>Pro Tip:</strong> {tip}</span>
+        <main className="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 overflow-y-auto">
+          {/* Text Content Column */}
+          <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-brand-primary">Konten Teks</h3>
+              <div>
+                <label htmlFor="hook" className="block text-sm font-medium text-brand-text-secondary mb-1">Hook (Teks Overlay Gambar)</label>
+                <input type="text" name="hook" id="hook" value={formData.hook} onChange={handleChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary" placeholder="Teks singkat di atas gambar"/>
+              </div>
+              
+              <div>
+                <label htmlFor="headline" className="block text-sm font-medium text-brand-text-secondary mb-1">Headline Iklan</label>
+                <textarea name="headline" id="headline" rows={2} value={formData.headline} onChange={handleChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary" />
+                {tip && (
+                    <div className="mt-2 p-2 bg-blue-900/30 border border-blue-500/40 rounded-md text-xs flex items-start gap-2 text-blue-200">
+                        <InfoIcon className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <span><strong>Pro Tip:</strong> {tip}</span>
+                    </div>
+                )}
+              </div>
+          </div>
+
+          {/* Visuals & Strategy Column */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-brand-primary">Gaya Visual & Strategi</h3>
+             <div>
+                <div className="flex justify-between items-center mb-1">
+                    <label htmlFor="visualPrompt" className="block text-sm font-medium text-brand-text-secondary">Prompt Visual Utama</label>
+                    <button
+                        onClick={handleRefinePrompt}
+                        disabled={isRefining || !campaignBlueprint}
+                        className="flex items-center gap-1 text-xs px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Hasilkan prompt visual baru berdasarkan Arahan Visual di atas"
+                    >
+                        {isRefining ? <RefreshCwIcon className="w-3 h-3 animate-spin" /> : <SparklesIcon className="w-3 h-3" />}
+                        Sempurnakan
+                    </button>
                 </div>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="textOverlay" className="block text-sm font-medium text-brand-text-secondary mb-1">Teks Overlay Gambar</label>
-            <input type="text" name="textOverlay" id="textOverlay" value={formData.textOverlay || ''} onChange={handleChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary" placeholder="Teks singkat di atas gambar"/>
-          </div>
-
-          <div>
-            <label htmlFor="hook" className="block text-sm font-medium text-brand-text-secondary mb-1">Hook (Caption)</label>
-            <textarea name="hook" id="hook" rows={2} value={formData.hook} onChange={handleChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary"></textarea>
+                <textarea name="visualPrompt" id="visualPrompt" rows={4} value={formData.visualPrompt} onChange={handleChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary"></textarea>
+            </div>
+             <div className="p-4 bg-gray-900/50 border border-gray-700 rounded-lg">
+                <div className="flex justify-between items-center">
+                    <h4 className="font-semibold">Tata Letak Teks AI</h4>
+                     <button
+                        onClick={handleSuggestLayout}
+                        disabled={isSuggesting || !concept.imageUrls?.length}
+                        className="flex items-center gap-2 text-sm px-3 py-2 bg-brand-primary hover:bg-indigo-500 rounded-md disabled:opacity-50 disabled:cursor-wait font-bold"
+                        title={!concept.imageUrls?.length ? "Hasilkan gambar terlebih dahulu" : "Sarankan tata letak teks menggunakan AI"}
+                    >
+                        {isSuggesting ? <RefreshCwIcon className="w-4 h-4 animate-spin"/> : <BrushIcon className="w-4 h-4" />}
+                        Sarankan Tata Letak
+                    </button>
+                </div>
+                 {(formData.headlineStyle || formData.textOverlayStyle) ? (
+                    <div className="mt-3 text-xs text-brand-text-secondary space-y-2">
+                         {formData.headlineStyle && <p><strong>Hook:</strong> {formData.headlineStyle.fontFamily}, {formData.headlineStyle.fontSize}vw, {formData.headlineStyle.color}</p>}
+                         {formData.textOverlayStyle && <p><strong>Headline:</strong> {formData.textOverlayStyle.fontFamily}, {formData.textOverlayStyle.fontSize}vw, {formData.textOverlayStyle.color}</p>}
+                    </div>
+                ) : (
+                    <p className="mt-2 text-xs text-brand-text-secondary">Klik untuk mendapatkan saran font, ukuran, warna, dan penempatan terbaik dari AI.</p>
+                )}
+            </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="personaDescription" className="block text-sm font-medium text-brand-text-secondary mb-1">Persona</label>
-              <input type="text" name="personaDescription" id="personaDescription" value={formData.personaDescription} onChange={handleChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary" />
-            </div>
-             <div>
-                <label htmlFor="trigger" className="block text-sm font-medium text-brand-text-secondary mb-1">🔥 Pemicu Pembelian</label>
-                <input type="text" name="trigger" id="trigger" value={formData.trigger.name} onChange={handleTriggerChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary" />
-            </div>
-             <div>
-              <label htmlFor="awarenessStage" className="block text-sm font-medium text-brand-text-secondary mb-1">Tahap Kesadaran</label>
-              <select name="awarenessStage" id="awarenessStage" value={formData.awarenessStage} onChange={handleChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary">
-                {ALL_AWARENESS_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="format" className="block text-sm font-medium text-brand-text-secondary mb-1">Format Kreatif</label>
-              <select name="format" id="format" value={formData.format} onChange={handleChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary">
-                {ALL_CREATIVE_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="visualVehicle" className="block text-sm font-medium text-brand-text-secondary mb-1">Arahan Visual (Visual Vehicle)</label>
-            <input
-              type="text"
-              name="visualVehicle"
-              id="visualVehicle"
-              value={formData.visualVehicle}
-              onChange={handleChange}
-              className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary"
-              placeholder="Contoh: 'Foto 'masalah' yang sangat relatable', 'Ekspresi 'aha!' saat menemukan solusi', 'Hasil 'setelah' yang dramatis dan memuaskan'"
-            />
-          </div>
-
-          <div>
-            <div className="flex justify-between items-center mb-1">
-                <label htmlFor="visualPrompt" className="block text-sm font-medium text-brand-text-secondary">Prompt Visual Utama</label>
-                <button
-                    onClick={handleRefinePrompt}
-                    disabled={isRefining || !campaignBlueprint}
-                    className="flex items-center gap-1 text-xs px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Hasilkan prompt visual baru berdasarkan Arahan Visual di atas"
-                >
-                    {isRefining ? <RefreshCwIcon className="w-3 h-3 animate-spin" /> : <SparklesIcon className="w-3 h-3" />}
-                    Sempurnakan Prompt
-                </button>
-            </div>
-            <textarea name="visualPrompt" id="visualPrompt" rows={4} value={formData.visualPrompt} onChange={handleChange} className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 focus:ring-2 focus:ring-brand-primary"></textarea>
-          </div>
 
           {formData.placement === 'Carousel' && formData.carouselSlides && formData.carouselSlides.length > 0 && (
-            <div className="space-y-3 border-t border-gray-700 pt-4">
+            <div className="md:col-span-2 space-y-3 border-t border-gray-700 pt-4">
               <div className="flex justify-between items-center">
                  <h3 className="text-lg font-semibold text-brand-text-primary">Slide Carousel</h3>
                  {formData.carouselArc && (
@@ -245,12 +281,12 @@ export const EditModal: React.FC<EditModalProps> = ({ concept, campaignBlueprint
                 <div key={slide.slideNumber} className="p-3 border border-gray-600 rounded-md space-y-2">
                   <p className="text-sm font-bold">Slide {slide.slideNumber}</p>
                   <div>
-                    <label className="text-xs text-brand-text-secondary mb-1 block">Headline Slide</label>
-                    <input type="text" value={slide.headline} onChange={e => handleSlideChange(e, index, 'headline')} className="w-full bg-gray-800 border-gray-700 rounded p-1.5 text-sm"/>
+                    <label className="text-xs text-brand-text-secondary mb-1 block">Hook Slide</label>
+                    <input type="text" value={slide.hook} onChange={e => handleSlideChange(e, index, 'hook')} className="w-full bg-gray-800 border-gray-700 rounded p-1.5 text-sm"/>
                   </div>
                    <div>
-                    <label className="text-xs text-brand-text-secondary mb-1 block">Teks Overlay Slide</label>
-                    <input type="text" value={slide.textOverlay || ''} onChange={e => handleSlideChange(e, index, 'textOverlay')} className="w-full bg-gray-800 border-gray-700 rounded p-1.5 text-sm" placeholder="Teks singkat untuk slide ini"/>
+                    <label className="text-xs text-brand-text-secondary mb-1 block">Headline Slide</label>
+                    <input type="text" value={slide.headline} onChange={e => handleSlideChange(e, index, 'headline')} className="w-full bg-gray-800 border-gray-700 rounded p-1.5 text-sm" />
                   </div>
                    <div>
                     <label className="text-xs text-brand-text-secondary mb-1 block">Deskripsi Slide</label>

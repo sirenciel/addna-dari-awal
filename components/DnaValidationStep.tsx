@@ -1,12 +1,14 @@
 
-import React, { useState } from 'react';
-import { CampaignBlueprint, TargetPersona } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { CampaignBlueprint, TargetPersona, BuyingTriggerObject, CreativeFormat, ALL_CREATIVE_FORMATS } from '../types';
 import { InfoIcon, RemixIcon } from './icons';
+import { generateCampaignOptions, CampaignOptions } from '../services/geminiService';
+import { CampaignSelections } from '../App';
 
 interface BlueprintValidationStepProps {
   initialBlueprint: CampaignBlueprint;
   referenceImage: string;
-  onWorkflowSelected: (validatedBlueprint: CampaignBlueprint, workflow: 'deep-dive' | 'quick-scale' | 'ugc-diversity-pack' | 'one-click-campaign' | 'hp-authority-pack') => void;
+  onStartCampaign: (validatedBlueprint: CampaignBlueprint, selections: CampaignSelections) => void;
   onBack: () => void;
   allowVisualExploration: boolean;
   onAllowVisualExplorationChange: (checked: boolean) => void;
@@ -26,38 +28,116 @@ const EditableTextarea: React.FC<{label: string, value: string, name: string, on
     </div>
 );
 
-const WorkflowCard: React.FC<{
-    icon: string;
-    title: string;
-    description: string;
-    why: string;
-    onClick: () => void;
-    recommended?: boolean;
-}> = ({ icon, title, description, why, onClick, recommended = false }) => (
-    <div
-        onClick={onClick}
-        className={`relative p-5 border rounded-xl h-full flex flex-col justify-between transition-all duration-200 bg-brand-surface hover:border-brand-primary hover:scale-105 hover:shadow-2xl hover:shadow-brand-primary/20 cursor-pointer ${recommended ? 'border-brand-primary' : 'border-gray-700'}`}
+const SelectableCard: React.FC<{ title: string; description?: string; isSelected: boolean; onSelect: () => void; }> = ({ title, description, isSelected, onSelect }) => (
+    <div 
+        onClick={onSelect}
+        className={`p-3 border-2 rounded-lg cursor-pointer transition-all h-full flex flex-col ${isSelected ? 'border-brand-primary bg-brand-primary/10' : 'border-gray-700 bg-gray-800 hover:border-gray-500'}`}
     >
-        {recommended && (
-            <div className="absolute -top-3 right-4 bg-brand-secondary text-white text-xs font-bold px-3 py-1 rounded-full">
-                DIREKOMENDASIKAN
+        <div className="flex items-start">
+            <input
+                type="checkbox"
+                readOnly
+                checked={isSelected}
+                className="mt-1 h-5 w-5 rounded text-brand-primary focus:ring-0"
+                style={{ boxShadow: 'none' }}
+            />
+            <div className="ml-3">
+                <p className="font-bold text-sm text-brand-text-primary">{title}</p>
+                {description && <p className="text-xs text-brand-text-secondary mt-1">{description}</p>}
             </div>
-        )}
-        <div>
-            <div className="text-3xl mb-3">{icon}</div>
-            <h3 className={`font-bold text-lg text-brand-text-primary`}>{title}</h3>
-            <p className={`text-sm mt-2 text-brand-text-secondary`}>{description}</p>
-        </div>
-        <div className="mt-4 pt-3 border-t border-gray-700">
-            <p className="text-xs font-semibold text-brand-primary">MENGAPA INI EFEKTIF:</p>
-            <p className="text-xs mt-1 text-gray-400">{why}</p>
         </div>
     </div>
 );
 
 
-export const DnaValidationStep: React.FC<BlueprintValidationStepProps> = ({ initialBlueprint, referenceImage, onWorkflowSelected, onBack, allowVisualExploration, onAllowVisualExplorationChange }) => {
+export const DnaValidationStep: React.FC<BlueprintValidationStepProps> = ({ initialBlueprint, referenceImage, onStartCampaign, onBack }) => {
+  const [step, setStep] = useState<'validate' | 'configure'>('validate');
+  const [isLoadingOptions, setIsLoadingOptions] = useState(false);
   const [blueprint, setBlueprint] = useState<CampaignBlueprint>(initialBlueprint);
+  
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOptions | null>(null);
+
+  const [selections, setSelections] = useState({
+      personas: new Set<string>([initialBlueprint.targetPersona.description]),
+      angles: new Set<string>(),
+      hooks: new Set<string>(),
+      formats: new Set<CreativeFormat>(),
+  });
+  
+  const allPersonaOptions = useMemo(() => {
+    if (!campaignOptions) return [blueprint.targetPersona];
+    return [blueprint.targetPersona, ...campaignOptions.personaVariations];
+  }, [blueprint.targetPersona, campaignOptions]);
+
+  const allHookOptions = useMemo(() => campaignOptions?.buyingTriggers || [], [campaignOptions]);
+
+
+  useEffect(() => {
+    // Pre-select first 3 of each category once loaded
+    if (campaignOptions) {
+        setSelections(prev => ({
+            ...prev,
+            angles: new Set(campaignOptions.strategicAngles.slice(0, 3)),
+            hooks: new Set(campaignOptions.buyingTriggers.map(h => h.name).slice(0, 3)),
+            formats: new Set(ALL_CREATIVE_FORMATS.slice(0, 4)),
+        }));
+    }
+  }, [campaignOptions]);
+
+
+  const handleNextStep = async () => {
+    setIsLoadingOptions(true);
+    try {
+        const options = await generateCampaignOptions(blueprint);
+        setCampaignOptions(options);
+        setStep('configure');
+    } catch (e) {
+        console.error("Gagal menghasilkan opsi kampanye", e);
+        alert("Gagal menghasilkan opsi kampanye. Silakan coba lagi.");
+    } finally {
+        setIsLoadingOptions(false);
+    }
+  };
+  
+  const handleSelectionChange = (category: keyof typeof selections, value: string) => {
+      setSelections(prev => {
+          const newSet = new Set(prev[category]);
+          if (newSet.has(value)) {
+              // For personas, prevent unselecting the last one
+              if (category === 'personas' && newSet.size === 1) {
+                  return prev;
+              }
+              newSet.delete(value);
+          } else {
+              newSet.add(value);
+          }
+          return { ...prev, [category]: newSet };
+      });
+  };
+
+  const totalConcepts = useMemo(() => {
+    const combinations = selections.personas.size * selections.angles.size * selections.hooks.size * selections.formats.size;
+    // Each combination will generate 3 variations (Emotional, Logical, Social)
+    return combinations * 3;
+  }, [selections]);
+
+  const handleStart = () => {
+    const selectedPersonas = allPersonaOptions.filter(p => selections.personas.has(p.description));
+    const selectedAngles = campaignOptions ? campaignOptions.strategicAngles.filter(a => selections.angles.has(a)) : [];
+    const selectedHooks = allHookOptions.filter(h => selections.hooks.has(h.name));
+    const selectedFormats = ALL_CREATIVE_FORMATS.filter(f => selections.formats.has(f));
+
+    if (selectedPersonas.length === 0 || selectedAngles.length === 0 || selectedHooks.length === 0 || selectedFormats.length === 0) {
+        alert("Harap pilih setidaknya satu opsi dari setiap kategori untuk melanjutkan.");
+        return;
+    }
+    onStartCampaign(blueprint, {
+        personas: selectedPersonas,
+        angles: selectedAngles,
+        hooks: selectedHooks,
+        formats: selectedFormats
+    });
+  };
   
   const handlePersonaChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, field: keyof TargetPersona) => {
       const { value } = e.target;
@@ -93,6 +173,98 @@ export const DnaValidationStep: React.FC<BlueprintValidationStepProps> = ({ init
         }
     }));
   };
+  
+  if (step === 'configure') {
+    return (
+        <div className="w-full min-h-screen flex flex-col items-center p-4 md:p-8">
+            <div className="text-center mb-6">
+                <h1 className="text-3xl md:text-4xl font-extrabold">2. Bangun Matriks Kreatif Anda</h1>
+                <p className="text-brand-text-secondary mt-2 text-lg">Pilih opsi yang dihasilkan AI untuk membangun kampanye pengujian Anda.</p>
+            </div>
+
+            <div className="w-full max-w-6xl mx-auto bg-brand-surface rounded-xl shadow-2xl p-6 space-y-6">
+                {/* Personas Section */}
+                <div>
+                    <h3 className="text-xl font-semibold text-brand-primary mb-3">Langkah 1: Pilih Persona Target</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                        {allPersonaOptions.map((persona) => (
+                            <SelectableCard
+                                key={persona.description}
+                                title={persona.description}
+                                description={`${persona.age} | ${persona.creatorType}`}
+                                isSelected={selections.personas.has(persona.description)}
+                                onSelect={() => handleSelectionChange('personas', persona.description)}
+                            />
+                        ))}
+                    </div>
+                </div>
+
+                {/* Angles Section */}
+                <div>
+                    <h3 className="text-xl font-semibold text-brand-primary mb-3">Langkah 2: Pilih Sudut Pandang Strategis</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                        {campaignOptions?.strategicAngles.map((angle) => (
+                             <SelectableCard
+                                key={angle}
+                                title={angle}
+                                isSelected={selections.angles.has(angle)}
+                                onSelect={() => handleSelectionChange('angles', angle)}
+                            />
+                        ))}
+                    </div>
+                </div>
+
+                {/* Hooks Section */}
+                <div>
+                    <h3 className="text-xl font-semibold text-brand-primary mb-3">Langkah 3: Pilih Hook / Pemicu Psikologis</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                        {allHookOptions.map((hook) => (
+                             <SelectableCard
+                                key={hook.name}
+                                title={hook.name}
+                                description={hook.example}
+                                isSelected={selections.hooks.has(hook.name)}
+                                onSelect={() => handleSelectionChange('hooks', hook.name)}
+                            />
+                        ))}
+                    </div>
+                </div>
+
+                 {/* Formats Section */}
+                <div>
+                    <h3 className="text-xl font-semibold text-brand-primary mb-3">Langkah 4: Pilih Format Kreatif</h3>
+                    <div className="flex flex-wrap gap-2">
+                        {ALL_CREATIVE_FORMATS.map((format) => (
+                            <button
+                                key={format}
+                                onClick={() => handleSelectionChange('formats', format)}
+                                className={`px-3 py-1.5 text-sm font-semibold rounded-full border-2 transition-colors ${selections.formats.has(format) ? 'bg-brand-primary border-brand-primary text-white' : 'bg-gray-800 border-gray-700 hover:border-gray-500'}`}
+                            >
+                                {format}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                
+                <div className="mt-8 pt-6 border-t border-gray-700 text-center">
+                    <button
+                        onClick={handleStart}
+                        className="w-full md:w-auto px-12 py-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold rounded-lg hover:scale-[1.03] transition-transform transform flex items-center justify-center mx-auto disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100"
+                        disabled={totalConcepts === 0}
+                    >
+                        <RemixIcon className="w-5 h-5 mr-2" />
+                        Hasilkan Matriks Kreatif ({totalConcepts} Varian Konsep)
+                    </button>
+                    <p className="text-xs text-brand-text-secondary mt-3">Total Konsep = (Persona × Sudut Pandang × Hook × Format) × 3 Varian</p>
+                </div>
+            </div>
+
+            <div className="mt-8 flex items-center justify-center gap-6">
+                <button onClick={() => setStep('validate')} className="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold">Kembali ke Validasi DNA</button>
+            </div>
+         </div>
+    );
+  }
 
   return (
     <div className="w-full min-h-screen flex flex-col items-center justify-center p-4 md:p-8">
@@ -142,69 +314,22 @@ export const DnaValidationStep: React.FC<BlueprintValidationStepProps> = ({ init
             </div>
         </div>
 
-        <div className="text-center mb-6 mt-4">
-            <h1 className="text-3xl md:text-4xl font-extrabold">2. Pilih Alur Kerja Anda</h1>
-            <p className="text-brand-text-secondary mt-2 text-lg">Bagaimana Anda ingin menghasilkan konsep iklan baru?</p>
-        </div>
-
-        <div className="w-full max-w-7xl">
-            {/* Recommended Workflow */}
-            <div
-              onClick={() => onWorkflowSelected(blueprint, 'one-click-campaign')}
-              className="w-full p-6 mb-6 bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl text-left transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl hover:shadow-purple-500/30 cursor-pointer"
+        <div className="mt-8 flex flex-col items-center justify-center gap-4">
+            <button
+                onClick={handleNextStep}
+                disabled={isLoadingOptions}
+                className="w-full md:w-auto px-12 py-4 bg-brand-primary text-white font-bold rounded-lg hover:bg-indigo-500 transition-transform transform hover:scale-105 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center"
             >
-              <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="text-2xl font-bold mb-1 text-white flex items-center gap-2">
-                        <RemixIcon className="w-6 h-6" /> Kampanye Keragaman Sekali Klik
-                    </h3>
-                    <p className="text-sm text-purple-200">Hasilkan 9 konsep yang berbeda secara fundamental dalam ~2 menit untuk menemukan pemenang tersembunyi dengan cepat.</p>
-                  </div>
-                  <div className="bg-white text-purple-700 font-bold text-xs px-3 py-1 rounded-full flex-shrink-0">
-                      DIREKOMENDASIKAN
-                  </div>
-              </div>
-              <div className="mt-4 pt-3 border-t border-purple-400/50">
-                  <p className="text-xs font-semibold text-white">MENGAPA INI EFEKTIF:</p>
-                  <p className="text-xs mt-1 text-purple-200">Strategi Meta modern memprioritaskan pemberian keragaman kreatif (visual & persona) kepada algoritma untuk menemukan kantong audiens yang menguntungkan. Alur kerja ini mengotomatiskan praktik terbaik tersebut.</p>
-              </div>
-            </div>
-
-            {/* Other Workflows */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <WorkflowCard
-                    icon="🎓"
-                    title="Penelusuran Mendalam Manual"
-                    description="Jelajahi setiap langkah strategis dari persona hingga penempatan untuk kontrol kreatif penuh."
-                    why="Gunakan ini untuk memahami psikologi audiens Anda secara mendalam atau ketika Anda memiliki hipotesis yang sangat spesifik untuk diuji. Peringatan: Pastikan untuk menciptakan keragaman visual secara manual."
-                    onClick={() => onWorkflowSelected(blueprint, 'deep-dive')}
-                />
-                <WorkflowCard
-                    icon="⚡"
-                    title="Skala Cepat (Remix Cerdas)"
-                    description="Hasilkan variasi cepat pada 3 persona yang berbeda untuk mengidentifikasi audiens baru dengan cepat."
-                    why="Menguji motivator persona yang berbeda adalah cara tercepat untuk membuka audiens baru. Ini sangat ideal untuk menskalakan kampanye yang sudah berhasil."
-                    onClick={() => onWorkflowSelected(blueprint, 'quick-scale')}
-                />
-                <WorkflowCard
-                    icon="🤳"
-                    title="Paket Keragaman UGC"
-                    description="Buat 4 konsep UGC yang otentik, masing-masing dari sudut pandang kreator yang berbeda."
-                    why="Data Meta menunjukkan kampanye UGC dengan 4-5 sudut pandang kreator yang beragam mengungguli kampanye kreator tunggal. Ini adalah cara tercepat untuk mendapatkan bukti sosial yang otentik."
-                    onClick={() => onWorkflowSelected(blueprint, 'ugc-diversity-pack')}
-                />
-                <WorkflowCard
-                    icon="👑"
-                    title="Paket Otoritas HP"
-                    description="Hasilkan 3 konsep yang dipimpin oleh ahli/founder untuk mengatasi keberatan umum dan membangun kepercayaan."
-                    why="Iklan yang dipimpin oleh pakar (HP) sangat baik dalam mengatasi skeptisisme audiens. Alur kerja ini mengotomatiskan pembuatan aset kepercayaan tinggi yang mengatasi keberatan utama."
-                    onClick={() => onWorkflowSelected(blueprint, 'hp-authority-pack')}
-                />
-            </div>
-        </div>
-
-        <div className="mt-8 flex items-center justify-center gap-6">
-             <button onClick={onBack} className="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold">Kembali</button>
+                {isLoadingOptions ? (
+                    <>
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        Membangun Opsi...
+                    </>
+                ) : (
+                    'Berikutnya: Bangun Matriks Kreatif'
+                )}
+            </button>
+            <button onClick={onBack} className="text-sm text-brand-text-secondary hover:text-white">Kembali ke Awal</button>
         </div>
     </div>
   );

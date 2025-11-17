@@ -1,8 +1,8 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { CampaignBlueprint, MindMapNode, AdConcept, AwarenessStage, CreativeFormat, PlacementFormat, TargetPersona, BuyingTriggerObject, ObjectionObject, PainDesireObject, OfferTypeObject } from '../types';
 import { RefreshCwIcon, ZoomInIcon, ZoomOutIcon, LocateIcon, Trash2Icon, UsersIcon, FireIcon, ShieldAlertIcon, HeartIcon, HeartCrackIcon, TagIcon, ZapIcon, LayoutGridIcon } from './icons';
 import { CreativeCard } from './CreativeCard';
+import { CAROUSEL_ARCS } from '../services/geminiService';
 
 // Layout Constants
 const X_SPACING_PERSONA = 350;
@@ -26,9 +26,6 @@ const Y_SPACING_TRIGGER = 30;
 const Y_SPACING_FORMAT = 30;
 const Y_SPACING_PLACEMENT = 20;
 const Y_SPACING_CREATIVE = 30;
-
-const CAROUSEL_ARCS = ['PAS', 'Transformation', 'Educational', 'Testimonial Story'];
-
 
 // --- Tooltip Component ---
 const Tooltip: React.FC<{ content: React.ReactNode; x: number; y: number }> = ({ content, x, y }) => {
@@ -324,6 +321,7 @@ const NodeComponent: React.FC<{
     onPlacementClick: (id: string) => void;
     onGenerateImage: (id: string) => void;
     onEditConcept: (id: string) => void;
+    onSaveConcept: (id: string, updatedContent: AdConcept) => void;
     onScaleWinner: (concept: AdConcept) => void;
     onOpenLightbox: (concept: AdConcept, startIndex: number) => void;
     onDeleteNode: (id: string) => void;
@@ -339,7 +337,9 @@ const NodeComponent: React.FC<{
     // For MindMapView, we will pass onScaleWinner, but the UI for it is on the gallery card.
     // We pass an empty function for onInitiateRemix to CreativeCard to satisfy the type.
     const creativeCard = node.type === 'creative'
-        ? <CreativeCard node={node} onGenerateImage={props.onGenerateImage} onEditConcept={props.onEditConcept} onScaleWinner={props.onScaleWinner} onOpenLightbox={props.onOpenLightbox} className="w-[160px] h-[240px]" isSelected={false} onSelect={()=>{}} />
+        // FIX: Removed hardcoded className as parent foreignObject controls dimensions.
+        // FIX: Added missing onSaveConcept prop to CreativeCard call.
+        ? <CreativeCard node={node} onGenerateImage={props.onGenerateImage} onEditConcept={props.onEditConcept} onOpenLightbox={props.onOpenLightbox} isSelected={false} onSelect={()=>{}} onSaveConcept={props.onSaveConcept} />
         : null;
 
     return (
@@ -549,6 +549,8 @@ interface MindMapViewProps {
     onTogglePlacement: (nodeId: string, options?: { isUgcPack?: boolean, preferredCarouselArc?: string }) => void;
     onGenerateImage: (conceptId: string) => void;
     onEditConcept: (conceptId: string) => void;
+    // FIX: Add onSaveConcept to props to be passed down to CreativeCard.
+    onSaveConcept: (conceptId: string, updatedContent: AdConcept) => void;
     onScaleWinner: (concept: AdConcept) => void;
     onOpenLightbox: (concept: AdConcept, startIndex: number) => void;
     onDeleteNode: (nodeId: string) => void;
@@ -880,17 +882,17 @@ export const MindMapView: React.FC<MindMapViewProps> = (props) => {
              {ugcModalNodeId && (
                 <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setUgcModalNodeId(null)}>
                     <div className="p-6 bg-brand-surface rounded-xl max-w-lg w-full" onClick={e => e.stopPropagation()}>
-                        <h3 className="text-xl font-bold">🎬 UGC Best Practice Alert</h3>
-                        <p className="mt-2 text-brand-text-secondary">Meta's data shows that <strong>UGC accounts with 4-5 creator POVs perform 3x better</strong> than single-creator UGC.</p>
+                        <h3 className="text-xl font-bold">🎬 Peringatan Praktik Terbaik UGC</h3>
+                        <p className="mt-2 text-brand-text-secondary">Data Meta menunjukkan bahwa <strong>akun UGC dengan 4-5 sudut pandang kreator berperforma 3x lebih baik</strong> daripada UGC dengan satu kreator.</p>
                         
                         <div className="mt-4 grid grid-cols-2 gap-4">
                             <div className="border border-red-500/50 p-3 rounded-lg bg-red-500/10">
-                                <p className="font-bold text-red-400">❌ Low-Performing UGC</p>
-                                <p className="text-sm mt-1">1 creator, same background, slight variations</p>
+                                <p className="font-bold text-red-400">❌ UGC Berperforma Rendah</p>
+                                <p className="text-sm mt-1">1 kreator, latar belakang sama, variasi sedikit</p>
                             </div>
                             <div className="border border-green-500/50 p-3 rounded-lg bg-green-500/10">
-                                <p className="font-bold text-green-400">✅ High-Performing UGC</p>
-                                <p className="text-sm mt-1">4-5 creators, different ages/settings/vibes, same core message</p>
+                                <p className="font-bold text-green-400">✅ UGC Berperforma Tinggi</p>
+                                <p className="text-sm mt-1">4-5 kreator, usia/latar/suasana berbeda, pesan inti sama</p>
                             </div>
                         </div>
                         
@@ -899,13 +901,13 @@ export const MindMapView: React.FC<MindMapViewProps> = (props) => {
                                 onClick={() => { onTogglePlacement(ugcModalNodeId, { isUgcPack: true }); setUgcModalNodeId(null); }} 
                                 className="flex-1 px-4 py-2 bg-brand-primary text-white font-bold rounded-lg hover:bg-indigo-500"
                             >
-                                Generate 4-Creator Diversity Pack (Recommended)
+                                Hasilkan Paket Keragaman 4 Kreator (Disarankan)
                             </button>
                             <button 
                                 onClick={() => { onTogglePlacement(ugcModalNodeId, { isUgcPack: false }); setUgcModalNodeId(null); }}
                                 className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
                             >
-                                Generate 1 Concept Only
+                                Hasilkan 1 Konsep Saja
                             </button>
                         </div>
                     </div>
@@ -914,18 +916,19 @@ export const MindMapView: React.FC<MindMapViewProps> = (props) => {
 
             {carouselModal.nodeId && (
                 <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setCarouselModal({ nodeId: '', selectedArc: null })}>
-                    <div className="p-6 bg-brand-surface rounded-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
-                        <h3 className="text-xl font-bold">📖 Choose Carousel Story Arc</h3>
-                        <p className="text-sm mt-1 text-brand-text-secondary">Select a narrative structure for your carousel ad.</p>
-                        <div className="grid grid-cols-2 gap-3 mt-4">
-                            {CAROUSEL_ARCS.map(arc => (
-                                <button
+                    <div className="p-6 bg-brand-surface rounded-xl max-w-2xl w-full" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-xl font-bold">📖 Pilih Alur Cerita Carousel</h3>
+                        <p className="text-sm mt-1 text-brand-text-secondary">Pilih struktur naratif untuk iklan carousel Anda.</p>
+                        <div className="grid grid-cols-2 gap-4 mt-4">
+                            {Object.entries(CAROUSEL_ARCS).map(([arc, desc]) => (
+                                <div
                                     key={arc}
                                     onClick={() => setCarouselModal(prev => ({ ...prev, selectedArc: arc }))}
-                                    className={`text-sm p-3 rounded-lg transition-colors ${carouselModal.selectedArc === arc ? 'bg-brand-primary' : 'bg-gray-700 hover:bg-gray-600'}`}
+                                    className={`p-4 rounded-lg cursor-pointer transition-all ${carouselModal.selectedArc === arc ? 'bg-brand-primary ring-2 ring-white' : 'bg-gray-800 hover:bg-gray-700'}`}
                                 >
-                                    {arc}
-                                </button>
+                                    <h4 className="font-bold text-lg">{arc}</h4>
+                                    <p className="text-xs text-gray-300 mt-1">{desc}</p>
+                                </div>
                             ))}
                         </div>
                          <button 
@@ -933,7 +936,7 @@ export const MindMapView: React.FC<MindMapViewProps> = (props) => {
                             disabled={!carouselModal.selectedArc}
                             className="mt-6 w-full px-4 py-2 bg-brand-secondary text-white font-bold rounded-lg hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            Generate Carousel Concepts
+                            Hasilkan Konsep Carousel
                         </button>
                     </div>
                 </div>
